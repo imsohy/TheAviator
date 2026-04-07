@@ -36,14 +36,6 @@
    - 렌더러 **`outputColorSpace = THREE.SRGBColorSpace`**
    - 파티클: **TweenMax → `gsap`**
 
-   ### 포팅 전후 색감 차이 분석
-
-   - **핵심 원인(유력):** 색 공간/컬러 매니지먼트 차이.  
-     포팅 후는 최신 Three 파이프라인(`renderer.outputColorSpace = THREE.SRGBColorSpace`)을 사용하고, r75 시절 렌더링과 감마 처리 방식이 달라 동일한 hex 색도 체감 톤이 달라질 수 있음.
-   - **보조 원인:** `Geometry` → `BufferGeometry` 마이그레이션 과정에서 노멀/면 처리 차이로 flat shading의 명암 분포가 약간 달라질 수 있음.
-   - **확인 방법:** `renderer.outputColorSpace`와 `THREE.ColorManagement.enabled`를 토글 비교하면 색 공간 영향 여부를 빠르게 분리 가능.
-   - **권장 방향:** 최신 파이프라인을 유지한 채 조명 강도/재질 색상/안개 색을 미세 조정해 레거시 톤에 맞추는 방식.
-
    ### HTML
 
    - `<script type="module" src="/src/...">` 로 스크립트 로드
