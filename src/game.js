@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   deformCabinGeometry,
   propellerTipDeform,
@@ -99,6 +100,8 @@ let nearPlane;
 let farPlane;
 let renderer;
 let container;
+let orbitControls;
+let orbitModeEnabled = false;
 
 // SCREEN & MOUSE VARIABLES
 
@@ -133,6 +136,13 @@ function createScene() {
   container = document.getElementById('world');
   container.appendChild(renderer.domElement);
 
+  orbitControls = new OrbitControls(camera, renderer.domElement);
+  orbitControls.enabled = false;
+  orbitControls.enableDamping = true;
+  orbitControls.dampingFactor = 0.08;
+  orbitControls.target.set(0, game.planeDefaultHeight, 0);
+  orbitControls.update();
+
   window.addEventListener('resize', handleWindowResize, false);
 }
 
@@ -147,6 +157,7 @@ function handleWindowResize() {
 }
 
 function handleMouseMove(event) {
+  if (orbitModeEnabled) return;
   const tx = -1 + (event.clientX / WIDTH) * 2;
   const ty = 1 - (event.clientY / HEIGHT) * 2;
   mousePos = { x: tx, y: ty };
@@ -154,9 +165,26 @@ function handleMouseMove(event) {
 
 function handleTouchMove(event) {
   event.preventDefault();
+  if (orbitModeEnabled) return;
   const tx = -1 + (event.touches[0].pageX / WIDTH) * 2;
   const ty = 1 - (event.touches[0].pageY / HEIGHT) * 2;
   mousePos = { x: tx, y: ty };
+}
+
+function toggleOrbitMode() {
+  orbitModeEnabled = !orbitModeEnabled;
+  orbitControls.enabled = orbitModeEnabled;
+
+  if (orbitModeEnabled) {
+    orbitControls.target.copy(airplane.mesh.position);
+    orbitControls.update();
+  }
+}
+
+function handleKeyDown(event) {
+  if (event.code !== 'Space') return;
+  event.preventDefault();
+  toggleOrbitMode();
 }
 
 function handleMouseUp() {
@@ -854,6 +882,11 @@ function loop() {
   sky.moveClouds();
   sea.moveWaves();
 
+  if (orbitModeEnabled) {
+    orbitControls.target.lerp(airplane.mesh.position, 0.12);
+    orbitControls.update();
+  }
+
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
@@ -915,9 +948,11 @@ function updatePlane() {
   airplane.mesh.rotation.z = (targetY - airplane.mesh.position.y) * deltaTime * game.planeRotXSensivity;
   airplane.mesh.rotation.x =
     (airplane.mesh.position.y - targetY) * deltaTime * game.planeRotZSensivity;
-  camera.fov = normalize(mousePos.x, -1, 1, 40, 80);
-  camera.updateProjectionMatrix();
-  camera.position.y += (airplane.mesh.position.y - camera.position.y) * deltaTime * game.cameraSensivity;
+  if (!orbitModeEnabled) {
+    camera.fov = normalize(mousePos.x, -1, 1, 40, 80);
+    camera.updateProjectionMatrix();
+    camera.position.y += (airplane.mesh.position.y - camera.position.y) * deltaTime * game.cameraSensivity;
+  }
 
   game.planeCollisionSpeedX += (0 - game.planeCollisionSpeedX) * deltaTime * 0.03;
   game.planeCollisionDisplacementX += (0 - game.planeCollisionDisplacementX) * deltaTime * 0.01;
@@ -972,6 +1007,7 @@ function init() {
   document.addEventListener('touchmove', handleTouchMove, false);
   document.addEventListener('mouseup', handleMouseUp, false);
   document.addEventListener('touchend', handleTouchEnd, false);
+  document.addEventListener('keydown', handleKeyDown, false);
 
   loop();
 }
