@@ -113,6 +113,8 @@ function createScene() {
   WIDTH = window.innerWidth;
 
   scene = new THREE.Scene();
+  const worldAxes = new THREE.AxesHelper(300);
+  scene.add(worldAxes);
   aspectRatio = WIDTH / HEIGHT;
   fieldOfView = 50;
   nearPlane = 0.1;
