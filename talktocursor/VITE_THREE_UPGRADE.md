@@ -25,6 +25,7 @@
    | `vite.config.js` | `index.html`, `part1.html`, `part2.html` 멀티 페이지 빌드 |
    | `public/css/` | 스타일시트 (기존 `css/` 복사본, `/css/...` 로 제공) |
    | `public/fonts/` | Codrops 아이콘 폰트 (`/fonts/...`, `demo.css`의 `@font-face`와 연동) |
+   | `talktocursor/COLOR_MANAGEMENT_LEGACY.md` | **색 공간·`ColorManagement` 결정**, 근거·한계·추후 검토 체크리스트 (필독 권장) |
 
    ### Three.js 관련 마이그레이션 요지
 
@@ -34,6 +35,7 @@
    - 레거시 `Geometry.vertices` / `verticesNeedUpdate` → **`position` attribute** 갱신 (`setXYZ`, `needsUpdate`)
    - 지오메트리 병합·변형에 **`mergeVertices`** 등 (`three/addons/utils/BufferGeometryUtils.js`)
    - 렌더러 **`outputColorSpace = THREE.SRGBColorSpace`**
+   - **색 관리 (요약만):** 기본 `ColorManagement.enabled === true`일 때와 구 r75 룩 차이로 색이 달라 보일 수 있음. 현재는 레거시에 가깝게 **`ColorManagement.enabled = false`** (`createScene()`에서 `WebGLRenderer`보다 먼저, `game.js` / `part1.js` / `part2.js`). **근거·트레이드오프·추후 검토 항목은 `talktocursor/COLOR_MANAGEMENT_LEGACY.md`에 상세 기술.**
    - 파티클: **TweenMax → `gsap`**
 
    ### HTML
@@ -107,9 +109,14 @@
 
 ---
 
-## 포팅 전/후 색감 차이 분석
+## 포팅 전후 색감 · 색 공간
 
-- **결론:** 주원인은 **색 공간/컬러 매니지먼트 정책 변화**입니다.
-- 포팅 후 `src/game.js`에서 `renderer.outputColorSpace = THREE.SRGBColorSpace`를 사용하고 있으며, 이는 구버전(r75) 렌더링과 최종 감마/출력 톤이 달라질 수 있습니다.
-- 동일한 hex 색(`0xf25346`, `0x68c3c0`)이라도 최신 Three.js의 선형-출력 변환, 안개(Fog), 조명(Hemisphere/Ambient/Directional) 합성 결과가 달라져 더 옅거나 대비가 다른 인상으로 보일 수 있습니다.
-- 즉, 조명 수치를 크게 바꾸지 않아도 **렌더링 파이프라인 차이만으로 색감 변화가 발생**합니다.
+**상세·결정 기록·“이 방법이 맞는지”에 대한 추후 검토 항목은 전부 아래 문서에 정리했습니다.**
+
+→ **[`COLOR_MANAGEMENT_LEGACY.md`](./COLOR_MANAGEMENT_LEGACY.md)**
+
+요약:
+
+- 주된 체감 차이는 **색 공간 / `ColorManagement` 기본값 변화**와 연관될 수 있음.
+- `renderer.outputColorSpace = THREE.SRGBColorSpace`는 **출력** 쪽이며, 재질 색이 어떻게 해석되는지와는 별개로 논의해야 함.
+- 현재 채택한 **`ColorManagement.enabled = false`는 레거시 룩 정렬용이며, 장기적으로 물리적으로 일관된 파이프라인을 쓸지는 별도 검토가 필요함** (문서 내 체크리스트 참고).

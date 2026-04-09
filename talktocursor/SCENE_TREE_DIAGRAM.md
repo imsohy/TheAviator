@@ -68,6 +68,8 @@ flowchart TB
 - **ennemiesHolder.mesh** 아래: 스폰 시 `ennemy.mesh` (TetrahedronGeometry)
 - **particlesHolder.mesh** 아래: 이펙트 시 `particle.mesh` (TetrahedronGeometry)
 
+**바다 메시 (`Sea`)**: `CylinderGeometry`에 `rotateX(-π/2)`를 적용한 뒤 `mergeVertices(geom, SEA_MERGE_VERTICES_TOLERANCE)`로 버텍스를 병합합니다. 허용 오차는 `src/game.js`의 `SEA_MERGE_VERTICES_TOLERANCE`(기본 `2.1`)이며, 기본 `mergeVertices`의 `1e-4`보다 넓게 잡아 변환 후 생기는 이음에서 메시가 끊겨 보이는 현상을 완화합니다.
+
 ---
 
 ## 2. 씬 밖 · 렌더 파이프라인
@@ -100,3 +102,5 @@ flowchart LR
 |------|------|
 | 이 문서 (`SCENE_TREE_DIAGRAM.md`) | Mermaid 다이어그램 (GitHub, VS Code 등에서 미리보기) |
 | `scene-tree.dot` | Graphviz (`dot -Tpng scene-tree.dot -o scene-tree.png`) |
+| `COLOR_MANAGEMENT_LEGACY.md` | 렌더 색 공간·`ColorManagement` 정책 (룩 정렬 vs 추후 검토) |
+

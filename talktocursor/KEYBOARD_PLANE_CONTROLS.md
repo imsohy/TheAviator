@@ -24,10 +24,10 @@ Three.js 기본 오일러 적용 시 이 자세에서는:
 
 | 입력 | 의미 | 회전 |
 |------|------|------|
-| W / S | 상·하 이동 | `rotation.z` ← `−inputY` (부호는 메시·카메라에 맞게 조정) |
-| D / A | Z 평면 좌·우 | `rotation.x` ← `inputZ` |
+| W / S | 상·하 이동 | `rotation.z` ← `+inputY` — 로컬 Z 오른손 규칙으로 양의 회전이 코(+X)를 +Y 쪽으로 기울임(상승 시 코가 위) |
+| D / A | Z 평면 좌·우 | `rotation.x` ← `inputZ` (롤) |
 
-초기 버그는 `inputY`/`inputZ`를 잘못된 축에 넣은 것이었고, 이후 **기대와 반대로 느껴질 때** 위 두 식의 부호를 `±`로 바꿔 맞춥니다.
+이전에 피치에 `−inputY`를 쓰면 상승(W)일 때 코가 아래로 기울어 보였다(부호 반대).
 
 상수: `KEYBOARD_PLANE_PITCH_TILT`, `KEYBOARD_PLANE_ROLL_TILT` (라디안 스케일, 기본 약 0.45).
 

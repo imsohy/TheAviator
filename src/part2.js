@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ColorManagement } from 'three';
 import {
   deformCabinGeometry,
   propellerTipDeform,
@@ -29,6 +30,9 @@ let WIDTH;
 let mousePos = { x: 0, y: 0 };
 
 function createScene() {
+  /** @see talktocursor/COLOR_MANAGEMENT_LEGACY.md */
+  ColorManagement.enabled = false;
+
   HEIGHT = window.innerHeight;
   WIDTH = window.innerWidth;
 

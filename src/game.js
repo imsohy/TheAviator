@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ColorManagement } from 'three';
 import gsap from 'gsap';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
@@ -125,9 +126,15 @@ const KEYBOARD_PLANE_Z_LIMIT = 120;
 const KEYBOARD_PLANE_PITCH_TILT = 0.45;
 const KEYBOARD_PLANE_ROLL_TILT = 0.45;
 
+/** `mergeVertices` tolerance for sea cylinder (weld seams; default 1e-4 was too tight after transforms). */
+const SEA_MERGE_VERTICES_TOLERANCE = 2.1;
+
 // INIT THREE JS, SCREEN AND MOUSE EVENTS
 
 function createScene() {
+  /** r75 룩에 가깝게. 장기 정책·트레이드오프: talktocursor/COLOR_MANAGEMENT_LEGACY.md — WebGLRenderer보다 먼저. */
+  ColorManagement.enabled = false;
+
   HEIGHT = window.innerHeight;
   WIDTH = window.innerWidth;
 
@@ -543,7 +550,7 @@ Sky.prototype.moveClouds = function () {
 const Sea = function () {
   let geom = new THREE.CylinderGeometry(game.seaRadius, game.seaRadius, game.seaLength, 40, 10);
   geom.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
-  geom = mergeVertices(geom);
+  geom = mergeVertices(geom, SEA_MERGE_VERTICES_TOLERANCE);
 
   this.waves = [];
 
@@ -1038,8 +1045,8 @@ function updatePlane() {
       KEYBOARD_PLANE_Z_LIMIT,
     );
 
-    // W/S → world Y move → pitch; A/D → world Z → roll (signs tuned to match expected tilt).
-    airplane.mesh.rotation.z = -inputY * KEYBOARD_PLANE_PITCH_TILT;
+    // Pitch: +rotation.z (local Z, RH rule) tips +X nose toward +Y — use +inputY so W (climb) nose-up.
+    airplane.mesh.rotation.z = inputY * KEYBOARD_PLANE_PITCH_TILT;
     airplane.mesh.rotation.x = inputZ * KEYBOARD_PLANE_ROLL_TILT;
   }
 
