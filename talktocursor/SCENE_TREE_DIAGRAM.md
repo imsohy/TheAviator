@@ -16,7 +16,8 @@ flowchart TB
     HL[HemisphereLight]
     DL[DirectionalLight shadowLight]
     AL[AmbientLight]
-    subgraph Air["airplane.mesh Object3D name airPlane"]
+    subgraph Rig["airplaneRig Object3D name airPlaneRig translation only"]
+      subgraph Air["airplane.mesh Object3D name airPlane rotation scale"]
       CAB[cabin Mesh]
       ENG[engine Mesh]
       TAIL[tailPlane Mesh]
@@ -47,6 +48,8 @@ flowchart TB
         EL[earL Mesh]
         ER[earR Mesh]
       end
+      end
+      FP["PerspectiveCamera 1인칭 시 Rig 자식"]
     end
     SEA[sea.mesh Mesh name waves]
     subgraph SKY["sky.mesh Object3D"]
@@ -85,7 +88,8 @@ flowchart LR
   CAM --> REN
 ```
 
-- **OrbitControls**: `Space` 토글 시 `enabled`, `target`이 비행기 위치를 부드럽게 추적합니다.
+- **OrbitControls**: `viewMode === 'orbit'`일 때 `enabled`, `target`이 `airplaneRig.position`을 부드럽게 추적합니다.
+- **카메라**: 3인칭·Orbit일 때는 씬에 붙지 않은 월드 카메라. 1인칭일 때만 `airplaneRig`의 자식(메시와 형제).
 - **안개**: 현재 `scene.fog = null` (비활성). 자세한 내용은 `FOG_DISABLED.md` 참고.
 
 ---

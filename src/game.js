@@ -19,6 +19,13 @@ const Colors = {
   blue: 0x68c3c0,
 };
 
+/** 비행기 위치(translation) 전용 부모. 자식으로 `airplane.mesh`(회전)와 1인칭 카메라를 두면 기체 roll/pitch가 카메라에 전달되지 않음. */
+const FIRST_PERSON_CAMERA_LOCAL = {
+  position: new THREE.Vector3(8 - 100, 7, 0),
+  /** 이전(Math.PI/2) 대비 수평 시선 180° 반대 */
+  rotation: new THREE.Euler(0, -Math.PI / 2, 0),
+};
+
 // GAME VARIABLES
 let game;
 let deltaTime = 0;
@@ -101,7 +108,8 @@ let farPlane;
 let renderer;
 let container;
 let orbitControls;
-let orbitModeEnabled = false;
+/** `'third'` | `'first'` | `'orbit'` — Space로 순환 */
+let viewMode = 'third';
 
 // SCREEN & MOUSE VARIABLES
 
@@ -157,7 +165,7 @@ function handleWindowResize() {
 }
 
 function handleMouseMove(event) {
-  if (orbitModeEnabled) return;
+  if (viewMode === 'orbit') return;
   const tx = -1 + (event.clientX / WIDTH) * 2;
   const ty = 1 - (event.clientY / HEIGHT) * 2;
   mousePos = { x: tx, y: ty };
@@ -165,26 +173,70 @@ function handleMouseMove(event) {
 
 function handleTouchMove(event) {
   event.preventDefault();
-  if (orbitModeEnabled) return;
+  if (viewMode === 'orbit') return;
   const tx = -1 + (event.touches[0].pageX / WIDTH) * 2;
   const ty = 1 - (event.touches[0].pageY / HEIGHT) * 2;
   mousePos = { x: tx, y: ty };
 }
 
-function toggleOrbitMode() {
-  orbitModeEnabled = !orbitModeEnabled;
-  orbitControls.enabled = orbitModeEnabled;
+function detachCameraPreserveWorld() {
+  if (!camera.parent) return;
+  camera.updateMatrixWorld(true);
+  const wp = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const scl = new THREE.Vector3();
+  camera.matrixWorld.decompose(wp, quat, scl);
+  camera.parent.remove(camera);
+  camera.position.copy(wp);
+  camera.quaternion.copy(quat);
+  camera.scale.set(1, 1, 1);
+}
 
-  if (orbitModeEnabled) {
-    orbitControls.target.copy(airplane.mesh.position);
-    orbitControls.update();
+function applyThirdPersonCamera() {
+  detachCameraPreserveWorld();
+  camera.position.set(0, airplaneRig.position.y, 200);
+  camera.rotation.set(0, 0, 0);
+  camera.updateProjectionMatrix();
+}
+
+function enterFirstPerson() {
+  orbitControls.enabled = false;
+  camera.removeFromParent();
+  airplaneRig.add(camera);
+  camera.position.copy(FIRST_PERSON_CAMERA_LOCAL.position);
+  camera.rotation.copy(FIRST_PERSON_CAMERA_LOCAL.rotation);
+  camera.updateProjectionMatrix();
+  viewMode = 'first';
+}
+
+function enterOrbitFromCurrent() {
+  detachCameraPreserveWorld();
+  orbitControls.target.copy(airplaneRig.position);
+  orbitControls.update();
+  orbitControls.enabled = true;
+  viewMode = 'orbit';
+}
+
+function enterThirdPersonFromOrbit() {
+  orbitControls.enabled = false;
+  applyThirdPersonCamera();
+  viewMode = 'third';
+}
+
+function cycleViewMode() {
+  if (viewMode === 'third') {
+    enterFirstPerson();
+  } else if (viewMode === 'first') {
+    enterOrbitFromCurrent();
+  } else {
+    enterThirdPersonFromOrbit();
   }
 }
 
 function handleKeyDown(event) {
   if (event.code !== 'Space') return;
   event.preventDefault();
-  toggleOrbitMode();
+  cycleViewMode();
 }
 
 function handleMouseUp() {
@@ -601,7 +653,7 @@ EnnemiesHolder.prototype.rotateEnnemies = function () {
     ennemy.mesh.rotation.z += Math.random() * 0.1;
     ennemy.mesh.rotation.y += Math.random() * 0.1;
 
-    const diffPos = airplane.mesh.position.clone().sub(ennemy.mesh.position);
+    const diffPos = airplaneRig.position.clone().sub(ennemy.mesh.position);
     const d = diffPos.length();
     if (d < game.ennemyDistanceTolerance) {
       particlesHolder.spawnParticles(ennemy.mesh.position.clone(), 15, Colors.red, 3);
@@ -741,7 +793,7 @@ CoinsHolder.prototype.rotateCoins = function () {
     coin.mesh.rotation.z += Math.random() * 0.1;
     coin.mesh.rotation.y += Math.random() * 0.1;
 
-    const diffPos = airplane.mesh.position.clone().sub(coin.mesh.position);
+    const diffPos = airplaneRig.position.clone().sub(coin.mesh.position);
     const d = diffPos.length();
     if (d < game.coinDistanceTolerance) {
       const hitPos = coin.mesh.position.clone();
@@ -761,16 +813,22 @@ CoinsHolder.prototype.rotateCoins = function () {
 // 3D Models
 let sea;
 let airplane;
+/** translation만 담당. 자식: `airplane.mesh`(회전), 1인칭 시 `camera` */
+let airplaneRig;
 let sky;
 let coinsHolder;
 let ennemiesHolder;
 let particlesHolder;
 
 function createPlane() {
+  airplaneRig = new THREE.Object3D();
+  airplaneRig.name = 'airPlaneRig';
   airplane = new AirPlane();
   airplane.mesh.scale.set(0.25, 0.25, 0.25);
-  airplane.mesh.position.y = game.planeDefaultHeight;
-  scene.add(airplane.mesh);
+  airplane.mesh.position.set(0, 0, 0);
+  airplaneRig.position.set(0, game.planeDefaultHeight, 0);
+  airplaneRig.add(airplane.mesh);
+  scene.add(airplaneRig);
 }
 
 function createSea() {
@@ -859,9 +917,9 @@ function loop() {
     airplane.mesh.rotation.z += (-Math.PI / 2 - airplane.mesh.rotation.z) * 0.0002 * deltaTime;
     airplane.mesh.rotation.x += 0.0003 * deltaTime;
     game.planeFallSpeed *= 1.05;
-    airplane.mesh.position.y -= game.planeFallSpeed * deltaTime;
+    airplaneRig.position.y -= game.planeFallSpeed * deltaTime;
 
-    if (airplane.mesh.position.y < -200) {
+    if (airplaneRig.position.y < -200) {
       showReplay();
       game.status = 'waitingReplay';
     }
@@ -882,8 +940,8 @@ function loop() {
   sky.moveClouds();
   sea.moveWaves();
 
-  if (orbitModeEnabled) {
-    orbitControls.target.lerp(airplane.mesh.position, 0.12);
+  if (viewMode === 'orbit') {
+    orbitControls.target.lerp(airplaneRig.position, 0.12);
     orbitControls.update();
   }
 
@@ -942,16 +1000,16 @@ function updatePlane() {
   game.planeCollisionDisplacementY += game.planeCollisionSpeedY;
   targetY += game.planeCollisionDisplacementY;
 
-  airplane.mesh.position.y += (targetY - airplane.mesh.position.y) * deltaTime * game.planeMoveSensivity;
-  airplane.mesh.position.x += (targetX - airplane.mesh.position.x) * deltaTime * game.planeMoveSensivity;
+  airplaneRig.position.y += (targetY - airplaneRig.position.y) * deltaTime * game.planeMoveSensivity;
+  airplaneRig.position.x += (targetX - airplaneRig.position.x) * deltaTime * game.planeMoveSensivity;
 
-  airplane.mesh.rotation.z = (targetY - airplane.mesh.position.y) * deltaTime * game.planeRotXSensivity;
+  airplane.mesh.rotation.z = (targetY - airplaneRig.position.y) * deltaTime * game.planeRotXSensivity;
   airplane.mesh.rotation.x =
-    (airplane.mesh.position.y - targetY) * deltaTime * game.planeRotZSensivity;
-  if (!orbitModeEnabled) {
+    (airplaneRig.position.y - targetY) * deltaTime * game.planeRotZSensivity;
+  if (viewMode === 'third') {
     camera.fov = normalize(mousePos.x, -1, 1, 40, 80);
     camera.updateProjectionMatrix();
-    camera.position.y += (airplane.mesh.position.y - camera.position.y) * deltaTime * game.cameraSensivity;
+    camera.position.y += (airplaneRig.position.y - camera.position.y) * deltaTime * game.cameraSensivity;
   }
 
   game.planeCollisionSpeedX += (0 - game.planeCollisionSpeedX) * deltaTime * 0.03;

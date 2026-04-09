@@ -23,8 +23,11 @@ digraph SceneTree {
   Scene -> AL [label="add"];
   AL [label="AmbientLight"];
 
-  Scene -> AirRoot [label="add"];
-  AirRoot [label="Object3D\nairplane.mesh\nname airPlane", fillcolor=lightblue, style="rounded,filled"];
+  Scene -> Rig [label="add"];
+  Rig [label="Object3D airplaneRig\ntranslation only", fillcolor=lightblue, style="rounded,filled"];
+
+  Rig -> AirRoot [label="add"];
+  AirRoot [label="Object3D airplane.mesh\nrotation + scale", fillcolor=lightblue, style="rounded,filled"];
 
   Scene -> SeaM [label="add"];
   SeaM [label="Mesh sea.mesh\nname waves"];
@@ -40,6 +43,9 @@ digraph SceneTree {
 
   Scene -> PartRoot [label="add"];
   PartRoot [label="Object3D\nparticlesHolder.mesh"];
+
+  Rig -> CamFP [label="1인칭 시", style=dashed];
+  CamFP [label="PerspectiveCamera\n(자식)", fillcolor=lightpink, style="rounded,filled"];
 
   // 비행기 하위 (요약)
   AirRoot -> Cabin [label=""];
