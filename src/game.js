@@ -8,6 +8,7 @@ import {
   applyTranslationToBufferGeometry,
   mergeVertices,
 } from './geometry-helpers.js';
+import { createSeaLavaShaderMaterial } from './sea-lava-shader.js';
 
 // COLORS
 const Colors = {
@@ -97,8 +98,9 @@ function resetGame() {
   };
   fieldLevel.innerHTML = Math.floor(game.level);
 
-  if (typeof sea !== 'undefined' && sea && sea.uWaveTimeUniform) {
-    sea.uWaveTimeUniform.value = 0;
+  if (typeof sea !== 'undefined' && sea && sea.lavaUniforms) {
+    sea.lavaUniforms.uWaveTime.value = 0;
+    sea.lavaUniforms.time.value = 1.0;
   }
 }
 
@@ -134,7 +136,7 @@ const KEYBOARD_PLANE_ROLL_TILT = 0.45;
 const SEA_MERGE_VERTICES_TOLERANCE = 2.1;
 /**
  * 바다 **메시 전체**가 도는 속도만 `game.speed` 대비 줄이기 (0~1). 1이면 구버전과 동일 비율.
- * 정점 파도(GPU `tickWaveTime`/셰이더)와는 별개. `talktocursor/SEA_WAVES_AND_ROTATION.md` 참고.
+ * 정점 파도·용암 셰이더와는 별개. `talktocursor/SEA_WAVES_AND_ROTATION.md`, `talktocursor/SEA_LAVA_SHADER.md` 참고.
  */
 const SEA_MESH_ROTATION_SCALE = 0.25;
 
@@ -576,50 +578,23 @@ const Sea = function () {
   geom.setAttribute('waveAmp', new THREE.BufferAttribute(ampArr, 1));
   geom.setAttribute('waveSpeed', new THREE.BufferAttribute(speedArr, 1));
 
-  const mat = new THREE.MeshPhongMaterial({
-    color: Colors.blue,
-    transparent: true,
-    opacity: 0.8,
-    flatShading: true,
-  });
-
-  /** CPU: ang += speed * deltaTime(ms) → GPU: ang = phase + speed * uWaveTime(ms) */
-  const self = this;
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uWaveTime = { value: 0 };
-    self.uWaveTimeUniform = shader.uniforms.uWaveTime;
-
-    shader.vertexShader =
-      'uniform float uWaveTime;\nattribute float wavePhase;\nattribute float waveAmp;\nattribute float waveSpeed;\n' +
-      shader.vertexShader;
-
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      [
-        'vec3 waveRest = vec3( position );',
-        'float wAng = wavePhase + waveSpeed * uWaveTime;',
-        'vec3 transformed = vec3(',
-        '  waveRest.x + cos( wAng ) * waveAmp,',
-        '  waveRest.y + sin( wAng ) * waveAmp,',
-        '  waveRest.z',
-        ');',
-      ].join('\n'),
-    );
-  };
-  mat.customProgramCacheKey = () => 'seaWaveGPU1';
-
-  this.uWaveTimeUniform = null;
+  const { material: mat, uniforms: lavaUniforms } = createSeaLavaShaderMaterial();
+  this.lavaUniforms = lavaUniforms;
 
   this.mesh = new THREE.Mesh(geom, mat);
   this.mesh.name = 'waves';
-  this.mesh.receiveShadow = true;
+  /** ShaderMaterial은 기본 그림자 맵 수신 없음 — 용암만 쓰려면 끔 */
+  this.mesh.receiveShadow = false;
 };
 
-/** GPU 버텍스 셰이더에서 파도 처리 — 누적 시간만 갱신 */
+/**
+ * 파도 위상(uWaveTime) + 용암 애니메이션(time). 예제 webgl_shader_lava 와 유사한 time 증가.
+ */
 Sea.prototype.tickWaveTime = function () {
-  if (this.uWaveTimeUniform) {
-    this.uWaveTimeUniform.value += deltaTime;
-  }
+  if (!this.lavaUniforms) return;
+  this.lavaUniforms.uWaveTime.value += deltaTime;
+  const ds = deltaTime * 0.001;
+  this.lavaUniforms.time.value += 0.2 * 5.0 * ds;
 };
 
 const Cloud = function () {

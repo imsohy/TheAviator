@@ -3,7 +3,7 @@
 `src/game.js`에서 바다는 크게 **두 가지 움직임**이 겹칩니다.
 
 1. **메시 전체 회전** — 여전히 CPU에서 `sea.mesh.rotation.z`만 갱신.
-2. **정점 파도** — **GPU 버텍스 셰이더**에서 처리 (`MeshPhongMaterial` + `onBeforeCompile`). 정점마다 `wavePhase` / `waveAmp` / `waveSpeed` **attribute**와 누적 시간 **`uWaveTime` uniform**으로, 예전 CPU `for` 루프와 **수학적으로 동일한** sin/cos 변위를 병렬 계산합니다.
+2. **정점 파도 + 용암 룩** — **`ShaderMaterial`** (`src/sea-lava-shader.js`, three.js `webgl_shader_lava` 기반). 정점마다 `wavePhase` / `waveAmp` / `waveSpeed`와 **`uWaveTime`**으로 파도 변위, fragment에서 용암 텍스처·애니메이션. 상세·검은 화면 이슈는 **`talktocursor/SEA_LAVA_SHADER.md`** 참고.
 
 ---
 
@@ -72,10 +72,9 @@
 ## 4. GPU 구현 (현재 코드)
 
 - **Geometry**: `position`은 **변경하지 않고** 레스트 포즈로 둡니다. 대신 `wavePhase`, `waveAmp`, `waveSpeed` **Float32BufferAttribute** (각 itemSize 1)를 한 번만 세팅합니다.
-- **Material**: `MeshPhongMaterial`에 **`onBeforeCompile`**으로 `#include <begin_vertex>`를 덮어써, `transformed`를 위 §3의 식으로 계산합니다.
-- **Uniform**: `uWaveTime` — 루프에서 `sea.tickWaveTime()`이 매 프레임 `deltaTime`(ms)만큼 가산. CPU에서 `ang`을 누적하던 것과 동일.
-- **캐시 키**: `customProgramCacheKey`로 다른 Phong과 셰이더 프로그램이 섞이지 않게 함.
-- **리플레이**: `resetGame()`에서 `sea.uWaveTimeUniform.value = 0`으로 파도 위상을 초기화.
+- **Material**: **`ShaderMaterial`** (`createSeaLavaShaderMaterial`) — vertex에서 §3과 동일 파도 변위, fragment는 용암 예제 셰이더. (이전 `MeshPhongMaterial` + `onBeforeCompile` 대체.)
+- **Uniform**: `uWaveTime`(파도), `time`(용암 흐름) — `sea.tickWaveTime()`에서 갱신.
+- **리플레이**: `resetGame()`에서 `sea.lavaUniforms`의 `uWaveTime` / `time` 초기화.
 
 ### 4.1 CPU `for` 루프와 비교
 
@@ -112,7 +111,8 @@
 | `sea.tickWaveTime()` — `uWaveTime`에 `deltaTime` 추가 | `src/game.js` `loop()` |
 | `Sea.prototype.tickWaveTime` | `src/game.js` |
 | `game.speed` 갱신 | `src/game.js` `loop()` (`playing` 분기) |
-| 파도 시간 리셋 | `resetGame()` — `sea.uWaveTimeUniform.value = 0` |
+| 파도·용암 시간 리셋 | `resetGame()` — `sea.lavaUniforms` |
+| 용암 셰이더 소스 | `src/sea-lava-shader.js` |
 
 ---
 
