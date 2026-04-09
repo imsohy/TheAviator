@@ -1,0 +1,69 @@
+// Graphviz: 메인 게임 (src/game.js) 씬·카메라 관계 요약
+// 렌더: dot -Tpng scene-tree.dot -o scene-tree.png
+//       dot -Tsvg scene-tree.dot -o scene-tree.svg
+
+digraph SceneTree {
+  rankdir=TB;
+  graph [fontname="Segoe UI", fontsize=10];
+  node [shape=box, style=rounded, fontname="Segoe UI", fontsize=9];
+  edge [fontname="Segoe UI", fontsize=8];
+
+  // 씬에 직접 붙는 최상위
+  Scene [label="THREE.Scene\n(scene)", fillcolor=lightyellow, style="rounded,filled"];
+
+  Scene -> Axes [label="add"];
+  Axes [label="AxesHelper(300)"];
+
+  Scene -> HL [label="add"];
+  HL [label="HemisphereLight"];
+
+  Scene -> DL [label="add"];
+  DL [label="DirectionalLight\n(shadowLight)"];
+
+  Scene -> AL [label="add"];
+  AL [label="AmbientLight"];
+
+  Scene -> AirRoot [label="add"];
+  AirRoot [label="Object3D\nairplane.mesh\nname airPlane", fillcolor=lightblue, style="rounded,filled"];
+
+  Scene -> SeaM [label="add"];
+  SeaM [label="Mesh sea.mesh\nname waves"];
+
+  Scene -> SkyRoot [label="add"];
+  SkyRoot [label="Object3D\nsky.mesh", fillcolor=lightcyan, style="rounded,filled"];
+
+  Scene -> CoinsRoot [label="add"];
+  CoinsRoot [label="Object3D\ncoinsHolder.mesh"];
+
+  Scene -> EnRoot [label="add"];
+  EnRoot [label="Object3D\nennemiesHolder.mesh"];
+
+  Scene -> PartRoot [label="add"];
+  PartRoot [label="Object3D\nparticlesHolder.mesh"];
+
+  // 비행기 하위 (요약)
+  AirRoot -> Cabin [label=""];
+  Cabin [label="Mesh cabin"];
+  AirRoot -> Engine [label=""];
+  Engine [label="Mesh engine"];
+  AirRoot -> Prop [label=""];
+  Prop [label="Mesh propeller\n+ blade1, blade2"];
+  AirRoot -> PilotRoot [label=""];
+  PilotRoot [label="Object3D pilot.mesh", fillcolor=wheat, style="rounded,filled"];
+
+  // 하늘·구름
+  SkyRoot -> Cloud1 [label="×20"];
+  Cloud1 [label="Object3D cloud.mesh\n+ cube chunks"];
+
+  // 씬 밖
+  subgraph cluster_render {
+    label="렌더 파이프 (씬 자식 아님)";
+    style=dashed;
+    Cam [label="PerspectiveCamera\nFOV 50 near 0.1 far 10000", fillcolor=lightpink, style="rounded,filled"];
+    Ren [label="WebGLRenderer"];
+    Orb [label="OrbitControls\n(camera, domElement)"];
+    Cam -> Ren [label="render(..., camera)", style=dashed];
+    Scene -> Ren [label="render(scene,...)", style=dashed];
+    Orb -> Cam [label="객체", style=dotted];
+  }
+}
