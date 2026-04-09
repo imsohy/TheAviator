@@ -117,6 +117,14 @@ let HEIGHT;
 let WIDTH;
 let mousePos = { x: 0, y: 0 };
 
+/** 월드 축 이동: W/S → Y+, Y− / D/A → Z+, Z− (`KeyW` 등 `event.code`) */
+const keysDown = new Set();
+const KEYBOARD_PLANE_SPEED = 140;
+const KEYBOARD_PLANE_Z_LIMIT = 120;
+/** Air mesh nose along +local X: rotation.z ≈ pitch, rotation.x ≈ roll (radians scale ~0.45 ≈ 26°). */
+const KEYBOARD_PLANE_PITCH_TILT = 0.45;
+const KEYBOARD_PLANE_ROLL_TILT = 0.45;
+
 // INIT THREE JS, SCREEN AND MOUSE EVENTS
 
 function createScene() {
@@ -234,9 +242,22 @@ function cycleViewMode() {
 }
 
 function handleKeyDown(event) {
-  if (event.code !== 'Space') return;
-  event.preventDefault();
-  cycleViewMode();
+  if (event.code === 'Space') {
+    event.preventDefault();
+    cycleViewMode();
+    return;
+  }
+  if (event.code === 'KeyW' || event.code === 'KeyS' || event.code === 'KeyA' || event.code === 'KeyD') {
+    keysDown.add(event.code);
+    event.preventDefault();
+  }
+}
+
+function handleKeyUp(event) {
+  if (event.code === 'KeyW' || event.code === 'KeyS' || event.code === 'KeyA' || event.code === 'KeyD') {
+    keysDown.delete(event.code);
+    event.preventDefault();
+  }
 }
 
 function handleMouseUp() {
@@ -984,38 +1005,63 @@ function removeEnergy() {
 }
 
 function updatePlane() {
-  game.planeSpeed = normalize(mousePos.x, -0.5, 0.5, game.planeMinSpeed, game.planeMaxSpeed);
-  let targetY = normalize(
-    mousePos.y,
-    -0.75,
-    0.75,
-    game.planeDefaultHeight - game.planeAmpHeight,
-    game.planeDefaultHeight + game.planeAmpHeight,
-  );
-  let targetX = normalize(mousePos.x, -1, 1, -game.planeAmpWidth * 0.7, -game.planeAmpWidth);
+  const dtSec = deltaTime * 0.001;
+
+  const movingKeys =
+    keysDown.has('KeyW') ||
+    keysDown.has('KeyS') ||
+    keysDown.has('KeyA') ||
+    keysDown.has('KeyD');
+  game.planeSpeed = movingKeys ? game.planeMaxSpeed : game.planeMinSpeed;
+
+  if (viewMode !== 'orbit') {
+    let inputY = 0;
+    let inputZ = 0;
+    if (keysDown.has('KeyW')) inputY += 1;
+    if (keysDown.has('KeyS')) inputY -= 1;
+    if (keysDown.has('KeyD')) inputZ += 1;
+    if (keysDown.has('KeyA')) inputZ -= 1;
+    const len = Math.hypot(inputY, inputZ);
+    if (len > 1e-6) {
+      inputY /= len;
+      inputZ /= len;
+    }
+    airplaneRig.position.y += inputY * KEYBOARD_PLANE_SPEED * dtSec;
+    airplaneRig.position.z += inputZ * KEYBOARD_PLANE_SPEED * dtSec;
+
+    const yMin = game.planeDefaultHeight - game.planeAmpHeight;
+    const yMax = game.planeDefaultHeight + game.planeAmpHeight;
+    airplaneRig.position.y = THREE.MathUtils.clamp(airplaneRig.position.y, yMin, yMax);
+    airplaneRig.position.z = THREE.MathUtils.clamp(
+      airplaneRig.position.z,
+      -KEYBOARD_PLANE_Z_LIMIT,
+      KEYBOARD_PLANE_Z_LIMIT,
+    );
+
+    // W/S → world Y move → pitch; A/D → world Z → roll (signs tuned to match expected tilt).
+    airplane.mesh.rotation.z = -inputY * KEYBOARD_PLANE_PITCH_TILT;
+    airplane.mesh.rotation.x = inputZ * KEYBOARD_PLANE_ROLL_TILT;
+  }
 
   game.planeCollisionDisplacementX += game.planeCollisionSpeedX;
-  targetX += game.planeCollisionDisplacementX;
-
   game.planeCollisionDisplacementY += game.planeCollisionSpeedY;
-  targetY += game.planeCollisionDisplacementY;
 
-  airplaneRig.position.y += (targetY - airplaneRig.position.y) * deltaTime * game.planeMoveSensivity;
+  const targetX = game.planeCollisionDisplacementX;
+  const targetY = airplaneRig.position.y + game.planeCollisionDisplacementY;
+
   airplaneRig.position.x += (targetX - airplaneRig.position.x) * deltaTime * game.planeMoveSensivity;
-
-  airplane.mesh.rotation.z = (targetY - airplaneRig.position.y) * deltaTime * game.planeRotXSensivity;
-  airplane.mesh.rotation.x =
-    (airplaneRig.position.y - targetY) * deltaTime * game.planeRotZSensivity;
-  if (viewMode === 'third') {
-    camera.fov = normalize(mousePos.x, -1, 1, 40, 80);
-    camera.updateProjectionMatrix();
-    camera.position.y += (airplaneRig.position.y - camera.position.y) * deltaTime * game.cameraSensivity;
-  }
+  airplaneRig.position.y += (targetY - airplaneRig.position.y) * deltaTime * game.planeMoveSensivity;
 
   game.planeCollisionSpeedX += (0 - game.planeCollisionSpeedX) * deltaTime * 0.03;
   game.planeCollisionDisplacementX += (0 - game.planeCollisionDisplacementX) * deltaTime * 0.01;
   game.planeCollisionSpeedY += (0 - game.planeCollisionSpeedY) * deltaTime * 0.03;
   game.planeCollisionDisplacementY += (0 - game.planeCollisionDisplacementY) * deltaTime * 0.01;
+
+  if (viewMode === 'third') {
+    camera.fov = normalize(mousePos.x, -1, 1, 40, 80);
+    camera.updateProjectionMatrix();
+    camera.position.y += (airplaneRig.position.y - camera.position.y) * deltaTime * game.cameraSensivity;
+  }
 
   airplane.pilot.updateHairs();
 }
@@ -1066,6 +1112,7 @@ function init() {
   document.addEventListener('mouseup', handleMouseUp, false);
   document.addEventListener('touchend', handleTouchEnd, false);
   document.addEventListener('keydown', handleKeyDown, false);
+  document.addEventListener('keyup', handleKeyUp, false);
 
   loop();
 }
