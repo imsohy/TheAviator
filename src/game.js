@@ -132,8 +132,12 @@ const KEYBOARD_PLANE_Z_LIMIT = 120;
 const KEYBOARD_PLANE_PITCH_TILT = 0.45;
 const KEYBOARD_PLANE_ROLL_TILT = 0.45;
 
-/** `mergeVertices` tolerance for sea cylinder (weld seams; default 1e-4 was too tight after transforms). */
-const SEA_MERGE_VERTICES_TOLERANCE = 2.1;
+/**
+ * `mergeVertices` tolerance for sea cylinder.
+ * - 파도 파라미터를 position 기반으로 결정적으로 만들면(아래 Sea 생성자) seam에서 크랙이 덜 나므로
+ *   UV가 중요한 용암 셰이더에서는 과도한 병합(예: 2.1)로 UV seam이 붕괴되지 않게 작은 값을 유지합니다.
+ */
+const SEA_MERGE_VERTICES_TOLERANCE = 1e-4;
 /**
  * 바다 **메시 전체**가 도는 속도만 `game.speed` 대비 줄이기 (0~1). 1이면 구버전과 동일 비율.
  * 정점 파도·용암 셰이더와는 별개. `talktocursor/SEA_WAVES_AND_ROTATION.md`, `talktocursor/SEA_LAVA_SHADER.md` 참고.
@@ -569,10 +573,42 @@ const Sea = function () {
   const phaseArr = new Float32Array(l);
   const ampArr = new Float32Array(l);
   const speedArr = new Float32Array(l);
+
+  // UV seam(원통 u=0/1)에서 정점이 중복될 수 있어도, 같은 위치는 같은 파도 파라미터를 갖게 만든다.
+  // (mergeVertices tolerance를 크게 올려 seam을 강제 용접하면 UV가 무너져 부채꼴/핀치가 생길 수 있음)
+  const q = 1000; // position quantize for stable hashing
+  const hash3 = (x, y, z) => {
+    // integer mix (xorshift-ish) using quantized position
+    let h = 2166136261;
+    h = Math.imul(h ^ (x | 0), 16777619);
+    h = Math.imul(h ^ (y | 0), 16777619);
+    h = Math.imul(h ^ (z | 0), 16777619);
+    // final avalanche
+    h ^= h >>> 13;
+    h = Math.imul(h, 1274126177);
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+  const rand01 = (seed) => {
+    // deterministic [0,1)
+    let t = (seed + 0x6d2b79f5) >>> 0;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
   for (let i = 0; i < l; i++) {
-    phaseArr[i] = Math.random() * Math.PI * 2;
-    ampArr[i] = game.wavesMinAmp + Math.random() * (game.wavesMaxAmp - game.wavesMinAmp);
-    speedArr[i] = game.wavesMinSpeed + Math.random() * (game.wavesMaxSpeed - game.wavesMinSpeed);
+    const xq = Math.round(pos.getX(i) * q);
+    const yq = Math.round(pos.getY(i) * q);
+    const zq = Math.round(pos.getZ(i) * q);
+    const h = hash3(xq, yq, zq);
+    const r0 = rand01(h);
+    const r1 = rand01(h ^ 0x9e3779b9);
+    const r2 = rand01(h ^ 0x85ebca6b);
+
+    phaseArr[i] = r0 * Math.PI * 2;
+    ampArr[i] = game.wavesMinAmp + r1 * (game.wavesMaxAmp - game.wavesMinAmp);
+    speedArr[i] = game.wavesMinSpeed + r2 * (game.wavesMaxSpeed - game.wavesMinSpeed);
   }
   geom.setAttribute('wavePhase', new THREE.BufferAttribute(phaseArr, 1));
   geom.setAttribute('waveAmp', new THREE.BufferAttribute(ampArr, 1));

@@ -68,7 +68,7 @@ flowchart TB
 - **ennemiesHolder.mesh** 아래: 스폰 시 `ennemy.mesh` (TetrahedronGeometry)
 - **particlesHolder.mesh** 아래: 이펙트 시 `particle.mesh` (TetrahedronGeometry)
 
-**바다 메시 (`Sea`)**: `CylinderGeometry`에 `rotateX(-π/2)`를 적용한 뒤 `mergeVertices(geom, SEA_MERGE_VERTICES_TOLERANCE)`로 버텍스를 병합합니다. 허용 오차는 `src/game.js`의 `SEA_MERGE_VERTICES_TOLERANCE`(기본 `2.1`)이며, 기본 `mergeVertices`의 `1e-4`보다 넓게 잡아 변환 후 생기는 이음에서 메시가 끊겨 보이는 현상을 완화합니다.
+**바다 메시 (`Sea`)**: `CylinderGeometry`에 `rotateX(-π/2)`를 적용한 뒤 `mergeVertices(geom, SEA_MERGE_VERTICES_TOLERANCE)`를 호출합니다. 현재 `SEA_MERGE_VERTICES_TOLERANCE`는 **작은 값(기본 `1e-4`)**으로 유지합니다. 이유는 용암 셰이더처럼 **UV seam이 중요한 재질에서** 과도한 병합이 seam을 붕괴시켜 **부채꼴/핀치(깊은 줄무늬)**를 만들 수 있기 때문입니다. 대신 파도 파라미터(`wavePhase/amp/speed`)를 **position 기반으로 결정적으로 생성**해 seam에서도 변위가 연속이 되도록 했습니다.
 
 ---
 

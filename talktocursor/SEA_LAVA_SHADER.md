@@ -35,3 +35,20 @@
 
 - 예제 토러스 vertex는 `uvScale * uv` + `modelViewMatrix * position` 만 사용.
 - 여기서는 동일 fragment에 맞추고, vertex만 **기존 파도**(`wavePhase` / `waveAmp` / `waveSpeed` / `uWaveTime`)로 `position`을 변형한 뒤 동일하게 투영합니다.
+
+## 원통에 생기는 “부채꼴/깊은 세로 줄무늬(핀치)” 이슈
+
+현상: 원통 한쪽 seam 부근이 **파이처럼 깊게 접힌 부채꼴**로 보이거나, 세로 줄무늬가 과장되어 보임.
+
+자주 겹치는 원인:
+
+1. **UV seam 자체**  
+   `CylinderGeometry`는 둘레 방향으로 `u=0`과 `u=1`이 만나는 세로 이음이 있고, 용암처럼 타일링/노이즈가 강하면 경계가 두드러져 보일 수 있습니다.
+
+2. **과도한 `mergeVertices` tolerance**  
+   seam에는 “같은 3D 위치 + 다른 UV” 정점이 존재합니다. `SEA_MERGE_VERTICES_TOLERANCE`를 너무 크게 잡으면 UV/인덱스가 사실상 붕괴하며, 삼각형이 한 점으로 몰리거나 접히면서 **핀치(부채꼴)**가 발생할 수 있습니다.
+
+현재 프로젝트의 대응:
+
+- `SEA_MERGE_VERTICES_TOLERANCE`를 **작게 유지(기본 `1e-4`)**하여 UV seam 토폴로지를 보호합니다.
+- seam에서 파도 변위가 갈라지지 않도록, `wavePhase/amp/speed`를 **vertex index 랜덤이 아니라 position 기반(결정적 해시)**으로 생성합니다. 즉 같은 위치의 중복 정점은 같은 파도 파라미터를 갖게 됩니다.
