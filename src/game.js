@@ -96,6 +96,10 @@ function resetGame() {
     status: 'playing',
   };
   fieldLevel.innerHTML = Math.floor(game.level);
+
+  if (typeof sea !== 'undefined' && sea && sea.uWaveTimeUniform) {
+    sea.uWaveTimeUniform.value = 0;
+  }
 }
 
 // THREEJS RELATED VARIABLES
@@ -128,6 +132,11 @@ const KEYBOARD_PLANE_ROLL_TILT = 0.45;
 
 /** `mergeVertices` tolerance for sea cylinder (weld seams; default 1e-4 was too tight after transforms). */
 const SEA_MERGE_VERTICES_TOLERANCE = 2.1;
+/**
+ * 바다 **메시 전체**가 도는 속도만 `game.speed` 대비 줄이기 (0~1). 1이면 구버전과 동일 비율.
+ * 정점 파도(GPU `tickWaveTime`/셰이더)와는 별개. `talktocursor/SEA_WAVES_AND_ROTATION.md` 참고.
+ */
+const SEA_MESH_ROTATION_SCALE = 0.25;
 
 // INIT THREE JS, SCREEN AND MOUSE EVENTS
 
@@ -552,24 +561,21 @@ const Sea = function () {
   geom.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
   geom = mergeVertices(geom, SEA_MERGE_VERTICES_TOLERANCE);
 
-  this.waves = [];
-
   const pos = geom.attributes.position;
   const l = pos.count;
 
+  const phaseArr = new Float32Array(l);
+  const ampArr = new Float32Array(l);
+  const speedArr = new Float32Array(l);
   for (let i = 0; i < l; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    this.waves.push({
-      y,
-      x,
-      z,
-      ang: Math.random() * Math.PI * 2,
-      amp: game.wavesMinAmp + Math.random() * (game.wavesMaxAmp - game.wavesMinAmp),
-      speed: game.wavesMinSpeed + Math.random() * (game.wavesMaxSpeed - game.wavesMinSpeed),
-    });
+    phaseArr[i] = Math.random() * Math.PI * 2;
+    ampArr[i] = game.wavesMinAmp + Math.random() * (game.wavesMaxAmp - game.wavesMinAmp);
+    speedArr[i] = game.wavesMinSpeed + Math.random() * (game.wavesMaxSpeed - game.wavesMinSpeed);
   }
+  geom.setAttribute('wavePhase', new THREE.BufferAttribute(phaseArr, 1));
+  geom.setAttribute('waveAmp', new THREE.BufferAttribute(ampArr, 1));
+  geom.setAttribute('waveSpeed', new THREE.BufferAttribute(speedArr, 1));
+
   const mat = new THREE.MeshPhongMaterial({
     color: Colors.blue,
     transparent: true,
@@ -577,22 +583,43 @@ const Sea = function () {
     flatShading: true,
   });
 
+  /** CPU: ang += speed * deltaTime(ms) → GPU: ang = phase + speed * uWaveTime(ms) */
+  const self = this;
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uWaveTime = { value: 0 };
+    self.uWaveTimeUniform = shader.uniforms.uWaveTime;
+
+    shader.vertexShader =
+      'uniform float uWaveTime;\nattribute float wavePhase;\nattribute float waveAmp;\nattribute float waveSpeed;\n' +
+      shader.vertexShader;
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      [
+        'vec3 waveRest = vec3( position );',
+        'float wAng = wavePhase + waveSpeed * uWaveTime;',
+        'vec3 transformed = vec3(',
+        '  waveRest.x + cos( wAng ) * waveAmp,',
+        '  waveRest.y + sin( wAng ) * waveAmp,',
+        '  waveRest.z',
+        ');',
+      ].join('\n'),
+    );
+  };
+  mat.customProgramCacheKey = () => 'seaWaveGPU1';
+
+  this.uWaveTimeUniform = null;
+
   this.mesh = new THREE.Mesh(geom, mat);
   this.mesh.name = 'waves';
   this.mesh.receiveShadow = true;
 };
 
-Sea.prototype.moveWaves = function () {
-  const pos = this.mesh.geometry.attributes.position;
-  const l = pos.count;
-  for (let i = 0; i < l; i++) {
-    const vprops = this.waves[i];
-    const x = vprops.x + Math.cos(vprops.ang) * vprops.amp;
-    const y = vprops.y + Math.sin(vprops.ang) * vprops.amp;
-    pos.setXYZ(i, x, y, vprops.z);
-    vprops.ang += vprops.speed * deltaTime;
+/** GPU 버텍스 셰이더에서 파도 처리 — 누적 시간만 갱신 */
+Sea.prototype.tickWaveTime = function () {
+  if (this.uWaveTimeUniform) {
+    this.uWaveTimeUniform.value += deltaTime;
   }
-  pos.needsUpdate = true;
 };
 
 const Cloud = function () {
@@ -956,7 +983,7 @@ function loop() {
   }
 
   airplane.propeller.rotation.x += 0.2 + game.planeSpeed * deltaTime * 0.005;
-  sea.mesh.rotation.z += game.speed * deltaTime;
+  sea.mesh.rotation.z += game.speed * deltaTime * SEA_MESH_ROTATION_SCALE;
 
   if (sea.mesh.rotation.z > 2 * Math.PI) sea.mesh.rotation.z -= 2 * Math.PI;
 
@@ -966,7 +993,7 @@ function loop() {
   ennemiesHolder.rotateEnnemies();
 
   sky.moveClouds();
-  sea.moveWaves();
+  sea.tickWaveTime();
 
   if (viewMode === 'orbit') {
     orbitControls.target.lerp(airplaneRig.position, 0.12);

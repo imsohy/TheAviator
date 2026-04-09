@@ -26,6 +26,7 @@
    | `public/css/` | 스타일시트 (기존 `css/` 복사본, `/css/...` 로 제공) |
    | `public/fonts/` | Codrops 아이콘 폰트 (`/fonts/...`, `demo.css`의 `@font-face`와 연동) |
    | `talktocursor/COLOR_MANAGEMENT_LEGACY.md` | **색 공간·`ColorManagement` 결정**, 근거·한계·추후 검토 체크리스트 (필독 권장) |
+   | `talktocursor/SEA_WAVES_AND_ROTATION.md` | 바다 **메시 회전** vs **정점 파도**(`moveWaves`), `SEA_MESH_ROTATION_SCALE` 등 |
 
    ### Three.js 관련 마이그레이션 요지
 

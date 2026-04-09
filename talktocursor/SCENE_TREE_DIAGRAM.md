@@ -103,4 +103,5 @@ flowchart LR
 | 이 문서 (`SCENE_TREE_DIAGRAM.md`) | Mermaid 다이어그램 (GitHub, VS Code 등에서 미리보기) |
 | `scene-tree.dot` | Graphviz (`dot -Tpng scene-tree.dot -o scene-tree.png`) |
 | `COLOR_MANAGEMENT_LEGACY.md` | 렌더 색 공간·`ColorManagement` 정책 (룩 정렬 vs 추후 검토) |
+| `SEA_WAVES_AND_ROTATION.md` | 바다 회전(`SEA_MESH_ROTATION_SCALE`)·`moveWaves` 정점 파도 |
 
