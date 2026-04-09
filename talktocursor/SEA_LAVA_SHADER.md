@@ -29,7 +29,33 @@
    `ShaderMaterial`은 기본 메시처럼 그림자 맵을 받지 않습니다. 바다는 **`receiveShadow = false`** 로 두었습니다.
 
 4. **예제의 Bloom**  
-   원본은 `EffectComposer` + `BloomPass`로 발광을 강조합니다. **메인 게임 렌더러에는 아직 넣지 않았**으므로, 예제보다 덜 “빛나는” 것처럼 보일 수 있습니다. 필요 시 후처리 파이프라인을 별도로 검토합니다.
+   원본은 `EffectComposer` + `BloomPass`로 발광을 강조합니다. 이 프로젝트도 메인 게임에 **Bloom을 적용**했습니다(아래 참고).
+
+## Bloom(빛 번짐) 적용
+
+### 적용 위치
+
+- `src/game.js`
+  - `EffectComposer` + `RenderPass` + `UnrealBloomPass` + `OutputPass`
+  - `loop()`에서 `renderer.render(scene, camera)` 대신 `composer.render()` 사용
+
+### 왜 구름/조종기까지 뿌옇게 되는가?
+
+Bloom은 기본적으로 **전역 postprocess**라서, 화면의 밝은 픽셀(용암뿐 아니라 구름/텍스트/하이라이트)도 함께 번집니다.
+
+### 튜닝 값
+
+`src/game.js`의 `LAVA_BLOOM`:
+
+- `threshold`: **이 값보다 밝은 픽셀만** bloom (올릴수록 영향 범위가 좁아짐)
+- `strength`: 번짐 강도
+- `radius`: 퍼짐 반경(블러 느낌)
+
+현재 값은 “용암의 아주 밝은 하이라이트만” 번지도록 `threshold`를 높이고 `strength`를 낮춘 상태입니다.
+
+### 선택적 Bloom(바다만) — 추후 옵션
+
+용암(바다)만 번지게 하려면, 레이어/마스크 기반으로 **bloom 렌더 패스를 분리**하는 방식(three.js selective bloom 패턴)을 적용할 수 있습니다.
 
 ## 파도(버텍스)와의 결합
 

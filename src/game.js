@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { ColorManagement } from 'three';
 import gsap from 'gsap';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import {
   deformCabinGeometry,
   propellerTipDeform,
@@ -115,6 +119,7 @@ let farPlane;
 let renderer;
 let container;
 let orbitControls;
+let composer;
 /** `'third'` | `'first'` | `'orbit'` — Space로 순환 */
 let viewMode = 'third';
 
@@ -144,6 +149,14 @@ const SEA_MERGE_VERTICES_TOLERANCE = 1e-4;
  */
 const SEA_MESH_ROTATION_SCALE = 0.25;
 
+/** Lava Bloom (global postprocess). Tune if too strong. */
+const LAVA_BLOOM = {
+  // Only the hottest lava highlights should bloom.
+  strength: 0.55,
+  radius: 0.25,
+  threshold: 0.78,
+};
+
 // INIT THREE JS, SCREEN AND MOUSE EVENTS
 
 function createScene() {
@@ -170,9 +183,18 @@ function createScene() {
   renderer.setSize(WIDTH, HEIGHT);
   renderer.shadowMap.enabled = true;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.autoClear = false;
 
   container = document.getElementById('world');
   container.appendChild(renderer.domElement);
+
+  composer = new EffectComposer(renderer);
+  composer.setSize(WIDTH, HEIGHT);
+  composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(
+    new UnrealBloomPass(new THREE.Vector2(WIDTH, HEIGHT), LAVA_BLOOM.strength, LAVA_BLOOM.radius, LAVA_BLOOM.threshold),
+  );
+  composer.addPass(new OutputPass());
 
   orbitControls = new OrbitControls(camera, renderer.domElement);
   orbitControls.enabled = false;
@@ -190,6 +212,7 @@ function handleWindowResize() {
   HEIGHT = window.innerHeight;
   WIDTH = window.innerWidth;
   renderer.setSize(WIDTH, HEIGHT);
+  if (composer) composer.setSize(WIDTH, HEIGHT);
   camera.aspect = WIDTH / HEIGHT;
   camera.updateProjectionMatrix();
 }
@@ -1011,7 +1034,8 @@ function loop() {
     orbitControls.update();
   }
 
-  renderer.render(scene, camera);
+  renderer.clear();
+  composer.render();
   requestAnimationFrame(loop);
 }
 
