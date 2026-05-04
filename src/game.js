@@ -147,11 +147,9 @@ const KEYBOARD_PLANE_ROLL_TILT = 0.45;
 const LAB1_TARGET_STEP = 30.0;
 const targetPos = new THREE.Vector3();
 const startQuat = new THREE.Quaternion();
-const midQuat = new THREE.Quaternion();
 /** 과제 가이드: 수평(레벨) 쪽 끝 orientation — 리셋 시 identity만 두고, 매 프레임 multiply 등으로 mutate 하지 않음. */
 const endQuat = new THREE.Quaternion();
 const targetQuat = new THREE.Quaternion();
-let slerpT = 0;
 
 /**
  * `mergeVertices` tolerance for sea cylinder.
@@ -347,7 +345,6 @@ function lab1OnPlaneKeyDown(code) {
   targetPos.set(p.x, p.y + dy, p.z + dz);
   lab1ClampTargetPosToPlayBounds();
 
-  slerpT = 0;
 
   // 과제 가이드: targetQuat은 setFromAxisAngle로 설정(한 축만 쓸 때는 targetQuat에 직접 호출, 대각은 축 각각 setFromAxisAngle 후 곱).
   if (dy !== 0 && dz === 0) {
@@ -986,9 +983,7 @@ function lab1ResetPlaneState() {
   airplaneRig.position.set(0, 0, 0);
   airplane.mesh.position.set(0, 100, 0);
   targetPos.copy(airplane.mesh.position);
-  slerpT = 0;
   startQuat.identity();
-  midQuat.identity();
   endQuat.identity();
   targetQuat.identity();
   airplane.mesh.quaternion.identity();
@@ -1004,9 +999,7 @@ function createPlane() {
   airplaneRig.position.set(0, 0, 0);
   airplane.mesh.position.set(0, 100, 0);
   targetPos.set(airplane.mesh.position.x, airplane.mesh.position.y, airplane.mesh.position.z);
-  slerpT = 0;
   startQuat.identity();
-  midQuat.identity();
   endQuat.identity();
   targetQuat.identity();
   airplane.mesh.quaternion.identity();
@@ -1246,23 +1239,27 @@ function updatePlane() {
     const tZ = Math.abs(airplane.mesh.position.z - targetZ);
     const orientMotionErr = Math.max(tY, tZ);
 
-    let qFrom = startQuat;
-    let qTo = targetQuat;
-    let orientT = 1;
+    // 남은 거리(오차)를 0~1로 정규화: 1이면 입력 직후(멀리), 0이면 도착 직전(가까움)
+    const errMax = LAB1_TARGET_STEP * 2.0;
+    const movePhase = THREE.MathUtils.clamp(orientMotionErr / errMax, 0, 1);
 
-    // far: start -> target, near: target -> level(end)
-    if (orientMotionErr > LAB1_TARGET_STEP * 0.5) {
-      const farStart = LAB1_TARGET_STEP * 2.0;
-      const farEnd = LAB1_TARGET_STEP * 0.5;
-      orientT = THREE.MathUtils.clamp((farStart - orientMotionErr) / (farStart - farEnd), 0, 1);
+    let qFrom;
+    let qTo;
+    let orientT;
+
+    // 과제 요구사항: t를 if로 분기 + SLERP는 1회만.
+    // split=0.6 이전: start->target(기울이기), 이후: target->level(복원)
+    const split = 0.6;
+    if (movePhase >= split) {
+      const local = THREE.MathUtils.clamp((movePhase - split) / (1 - split), 0, 1);
       qFrom = startQuat;
       qTo = targetQuat;
+      orientT = THREE.MathUtils.smoothstep(local, 0, 1);
     } else {
-      const nearStart = LAB1_TARGET_STEP * 0.5;
-      const nearEnd = 0;
-      orientT = THREE.MathUtils.clamp((nearStart - orientMotionErr) / (nearStart - nearEnd), 0, 1);
+      const local = THREE.MathUtils.clamp((split - movePhase) / split, 0, 1);
       qFrom = targetQuat;
       qTo = endQuat;
+      orientT = THREE.MathUtils.smoothstep(local, 0, 1);
     }
 
     airplane.mesh.quaternion.slerpQuaternions(qFrom, qTo, orientT);
