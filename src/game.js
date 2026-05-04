@@ -106,6 +106,10 @@ function resetGame() {
     sea.lavaUniforms.uWaveTime.value = 0;
     sea.lavaUniforms.time.value = 1.0;
   }
+
+  if (typeof airplane !== 'undefined' && airplane?.mesh && airplaneRig) {
+    lab1ResetPlaneState();
+  }
 }
 
 // THREEJS RELATED VARIABLES
@@ -129,13 +133,20 @@ let HEIGHT;
 let WIDTH;
 let mousePos = { x: 0, y: 0 };
 
-/** 월드 축 이동: W/S → Y+, Y− / D/A → Z+, Z− (`KeyW` 등 `event.code`) */
-const keysDown = new Set();
-const KEYBOARD_PLANE_SPEED = 140;
+/** Lab1 skeleton: WASD는 keydown·targetPos만 사용 */
 const KEYBOARD_PLANE_Z_LIMIT = 120;
 /** Air mesh nose along +local X: rotation.z ≈ pitch, rotation.x ≈ roll (radians scale ~0.45 ≈ 26°). */
 const KEYBOARD_PLANE_PITCH_TILT = 0.45;
 const KEYBOARD_PLANE_ROLL_TILT = 0.45;
+
+// --- Lab1 skeleton: 전역 (과제 스켈레톤 코드 구성 가이드.md 그대로) ---
+const LAB1_TARGET_STEP = 30.0;
+const targetPos = new THREE.Vector3();
+const startQuat = new THREE.Quaternion();
+const midQuat = new THREE.Quaternion();
+const endQuat = new THREE.Quaternion();
+const targetQuat = new THREE.Quaternion();
+let slerpT = 0;
 
 /**
  * `mergeVertices` tolerance for sea cylinder.
@@ -247,7 +258,8 @@ function detachCameraPreserveWorld() {
 
 function applyThirdPersonCamera() {
   detachCameraPreserveWorld();
-  camera.position.set(0, airplaneRig.position.y, 200);
+  getPlaneWorldPosition(_planeWorldPositionScratch);
+  camera.position.set(0, _planeWorldPositionScratch.y, 200);
   camera.rotation.set(0, 0, 0);
   camera.updateProjectionMatrix();
 }
@@ -255,7 +267,8 @@ function applyThirdPersonCamera() {
 function enterFirstPerson() {
   orbitControls.enabled = false;
   camera.removeFromParent();
-  airplaneRig.add(camera);
+  // skeleton이 mesh.local Y/Z를 쓰므로 FP 카메라는 mesh 자식으로 두어 기체와 같이 이동
+  airplane.mesh.add(camera);
   camera.position.copy(FIRST_PERSON_CAMERA_LOCAL.position);
   camera.rotation.copy(FIRST_PERSON_CAMERA_LOCAL.rotation);
   camera.updateProjectionMatrix();
@@ -264,7 +277,8 @@ function enterFirstPerson() {
 
 function enterOrbitFromCurrent() {
   detachCameraPreserveWorld();
-  orbitControls.target.copy(airplaneRig.position);
+  getPlaneWorldPosition(_planeWorldPositionScratch);
+  orbitControls.target.copy(_planeWorldPositionScratch);
   orbitControls.update();
   orbitControls.enabled = true;
   viewMode = 'orbit';
@@ -293,16 +307,42 @@ function handleKeyDown(event) {
     return;
   }
   if (event.code === 'KeyW' || event.code === 'KeyS' || event.code === 'KeyA' || event.code === 'KeyD') {
-    keysDown.add(event.code);
     event.preventDefault();
+    lab1OnPlaneKeyDown(event.code);
   }
 }
 
 function handleKeyUp(event) {
   if (event.code === 'KeyW' || event.code === 'KeyS' || event.code === 'KeyA' || event.code === 'KeyD') {
-    keysDown.delete(event.code);
     event.preventDefault();
   }
+}
+
+/** Lab1 skeleton: keydown 시 targetPos·쿼터니언 (실습 30.0 스텝) */
+function lab1OnPlaneKeyDown(code) {
+  if (!airplane?.mesh || game.status !== 'playing') return;
+  const p = airplane.mesh.position;
+  const step = LAB1_TARGET_STEP;
+  let dy = 0;
+  let dz = 0;
+  if (code === 'KeyW') dy += step;
+  if (code === 'KeyS') dy -= step;
+  if (code === 'KeyD') dz += step;
+  if (code === 'KeyA') dz -= step;
+  targetPos.set(p.x, p.y + dy, p.z + dz);
+
+  startQuat.copy(airplane.mesh.quaternion);
+  slerpT = 0;
+
+  const qPitch = new THREE.Quaternion();
+  const qRoll = new THREE.Quaternion();
+  if (dy !== 0) {
+    qPitch.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(dy) * KEYBOARD_PLANE_PITCH_TILT);
+  }
+  if (dz !== 0) {
+    qRoll.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(dz) * KEYBOARD_PLANE_ROLL_TILT);
+  }
+  targetQuat.copy(startQuat).multiply(qPitch).multiply(qRoll);
 }
 
 function handleMouseUp() {
@@ -920,14 +960,36 @@ let coinsHolder;
 let ennemiesHolder;
 let particlesHolder;
 
+/** 리플레이 시 Lab1 비행 상태 초기화 (init에서는 airplane 미생성) */
+function lab1ResetPlaneState() {
+  if (!airplane?.mesh || !airplaneRig) return;
+  airplaneRig.position.set(0, 0, 0);
+  airplane.mesh.position.set(0, 100, 0);
+  targetPos.copy(airplane.mesh.position);
+  slerpT = 0;
+  startQuat.identity();
+  midQuat.identity();
+  endQuat.identity();
+  targetQuat.identity();
+  airplane.mesh.quaternion.identity();
+  airplane.mesh.rotation.set(0, 0, 0);
+}
+
 function createPlane() {
   airplaneRig = new THREE.Object3D();
   airplaneRig.name = 'airPlaneRig';
   airplane = new AirPlane();
   airplane.mesh.scale.set(0.25, 0.25, 0.25);
-  // Lab1 skeleton은 mesh.local Y/Z 보간 가능 — 현재는 mesh 원점·rig에 높이(월드 y=planeDefaultHeight).
-  airplane.mesh.position.set(0, 0, 0);
-  airplaneRig.position.set(0, game.planeDefaultHeight, 0);
+  // skeleton: airplane.mesh.position.y = 100 에서 시작 — rig 원점, 높이는 mesh.local Y
+  airplaneRig.position.set(0, 0, 0);
+  airplane.mesh.position.set(0, 100, 0);
+  targetPos.set(airplane.mesh.position.x, airplane.mesh.position.y, airplane.mesh.position.z);
+  slerpT = 0;
+  startQuat.identity();
+  midQuat.identity();
+  endQuat.identity();
+  targetQuat.identity();
+  airplane.mesh.quaternion.identity();
   airplaneRig.add(airplane.mesh);
   scene.add(airplaneRig);
 }
@@ -1018,9 +1080,10 @@ function loop() {
     airplane.mesh.rotation.z += (-Math.PI / 2 - airplane.mesh.rotation.z) * 0.0002 * deltaTime;
     airplane.mesh.rotation.x += 0.0003 * deltaTime;
     game.planeFallSpeed *= 1.05;
-    airplaneRig.position.y -= game.planeFallSpeed * deltaTime;
+    airplane.mesh.position.y -= game.planeFallSpeed * deltaTime;
 
-    if (airplaneRig.position.y < -200) {
+    getPlaneWorldPosition(_planeWorldPositionScratch);
+    if (_planeWorldPositionScratch.y < -200) {
       showReplay();
       game.status = 'waitingReplay';
     }
@@ -1028,7 +1091,7 @@ function loop() {
     // waiting
   }
 
-  airplane.propeller.rotation.x += 0.2 + game.planeSpeed * deltaTime * 0.005;
+  airplane.propeller.rotation.x += game.planeSpeed * deltaTime * 0.005;
   sea.mesh.rotation.z += game.speed * deltaTime * SEA_MESH_ROTATION_SCALE;
 
   if (sea.mesh.rotation.z > 2 * Math.PI) sea.mesh.rotation.z -= 2 * Math.PI;
@@ -1042,7 +1105,8 @@ function loop() {
   sea.tickWaveTime();
 
   if (viewMode === 'orbit') {
-    orbitControls.target.lerp(airplaneRig.position, 0.12);
+    getPlaneWorldPosition(_planeWorldPositionScratch);
+    orbitControls.target.lerp(_planeWorldPositionScratch, 0.12);
     orbitControls.update();
   }
 
@@ -1085,53 +1149,60 @@ function removeEnergy() {
   game.energy = Math.max(0, game.energy);
 }
 
+/** Lab1 skeleton: WASD는 keydown·targetPos (keysDown 미사용) */
 function updatePlane() {
-  const dtSec = deltaTime * 0.001;
-
-  const movingKeys =
-    keysDown.has('KeyW') ||
-    keysDown.has('KeyS') ||
-    keysDown.has('KeyA') ||
-    keysDown.has('KeyD');
-  game.planeSpeed = movingKeys ? game.planeMaxSpeed : game.planeMinSpeed;
+  const tol = 0.75;
+  const nearTarget =
+    airplane &&
+    Math.abs(airplane.mesh.position.y - targetPos.y) < tol &&
+    Math.abs(airplane.mesh.position.z - targetPos.z) < tol;
+  game.planeSpeed = nearTarget ? game.planeMinSpeed : game.planeMaxSpeed;
 
   if (viewMode !== 'orbit') {
-    let inputY = 0;
-    let inputZ = 0;
-    if (keysDown.has('KeyW')) inputY += 1;
-    if (keysDown.has('KeyS')) inputY -= 1;
-    if (keysDown.has('KeyD')) inputZ += 1;
-    if (keysDown.has('KeyA')) inputZ -= 1;
-    const len = Math.hypot(inputY, inputZ);
-    if (len > 1e-6) {
-      inputY /= len;
-      inputZ /= len;
+    // --- Lab1 skeleton: updatePlane (과제 스켈레톤 코드 구성 가이드.md 예시) ---
+    var targetY = targetPos.y;
+    var targetZ = targetPos.z;
+
+    // Move the plane at each frame by adding a fraction of the remaining distance
+    airplane.mesh.position.y += (targetY - airplane.mesh.position.y) * 0.1;
+    airplane.mesh.position.z += (targetZ - airplane.mesh.position.z) * 0.1;
+
+    // t 를 구하는 아래 부분은 원하는대로 수정 가능
+    // target position 에 위치했을 때, 비행기가 평형상태에 오도록
+    let tY = Math.abs(airplane.mesh.position.y - targetY);
+    let tZ = Math.abs(airplane.mesh.position.z - targetZ);
+    let t = 1.0 - Math.max(tY, tZ) / 30.0;
+
+    endQuat.identity();
+
+    if (t <= 0.5) {
+      airplane.mesh.quaternion.copy(startQuat).slerp(targetQuat, Math.min(1, t * 2));
+      midQuat.copy(airplane.mesh.quaternion);
+    } else if (slerpT <= 1.0) {
+      airplane.mesh.quaternion.copy(midQuat).slerp(endQuat, Math.min(1, slerpT));
+      slerpT += 0.02;
     }
-    airplaneRig.position.y += inputY * KEYBOARD_PLANE_SPEED * dtSec;
-    airplaneRig.position.z += inputZ * KEYBOARD_PLANE_SPEED * dtSec;
+
+    airplane.propeller.rotation.x += 0.2;
 
     const yMin = game.planeDefaultHeight - game.planeAmpHeight;
     const yMax = game.planeDefaultHeight + game.planeAmpHeight;
-    airplaneRig.position.y = THREE.MathUtils.clamp(airplaneRig.position.y, yMin, yMax);
-    airplaneRig.position.z = THREE.MathUtils.clamp(
-      airplaneRig.position.z,
+    airplane.mesh.position.y = THREE.MathUtils.clamp(airplane.mesh.position.y, yMin, yMax);
+    airplane.mesh.position.z = THREE.MathUtils.clamp(
+      airplane.mesh.position.z,
       -KEYBOARD_PLANE_Z_LIMIT,
       KEYBOARD_PLANE_Z_LIMIT,
     );
-
-    // Pitch: +rotation.z (local Z, RH rule) tips +X nose toward +Y — use +inputY so W (climb) nose-up.
-    airplane.mesh.rotation.z = inputY * KEYBOARD_PLANE_PITCH_TILT;
-    airplane.mesh.rotation.x = inputZ * KEYBOARD_PLANE_ROLL_TILT;
   }
 
   game.planeCollisionDisplacementX += game.planeCollisionSpeedX;
   game.planeCollisionDisplacementY += game.planeCollisionSpeedY;
 
-  const targetX = game.planeCollisionDisplacementX;
-  const targetY = airplaneRig.position.y + game.planeCollisionDisplacementY;
+  const colTargetX = game.planeCollisionDisplacementX;
+  const colTargetY = airplane.mesh.position.y + game.planeCollisionDisplacementY;
 
-  airplaneRig.position.x += (targetX - airplaneRig.position.x) * deltaTime * game.planeMoveSensivity;
-  airplaneRig.position.y += (targetY - airplaneRig.position.y) * deltaTime * game.planeMoveSensivity;
+  airplaneRig.position.x += (colTargetX - airplaneRig.position.x) * deltaTime * game.planeMoveSensivity;
+  airplane.mesh.position.y += (colTargetY - airplane.mesh.position.y) * deltaTime * game.planeMoveSensivity;
 
   game.planeCollisionSpeedX += (0 - game.planeCollisionSpeedX) * deltaTime * 0.03;
   game.planeCollisionDisplacementX += (0 - game.planeCollisionDisplacementX) * deltaTime * 0.01;
@@ -1141,7 +1212,9 @@ function updatePlane() {
   if (viewMode === 'third') {
     camera.fov = normalize(mousePos.x, -1, 1, 40, 80);
     camera.updateProjectionMatrix();
-    camera.position.y += (airplaneRig.position.y - camera.position.y) * deltaTime * game.cameraSensivity;
+    getPlaneWorldPosition(_planeWorldPositionScratch);
+    camera.position.y +=
+      (_planeWorldPositionScratch.y - camera.position.y) * deltaTime * game.cameraSensivity;
   }
 
   airplane.pilot.updateHairs();

@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: paste skeleton
     content: 전역 quaternion/Vector3/state + keydown 30-step + updatePlane 블록을 과제 규격 그대로 삽입; propeller 중복 회전만 최소 조정
-    status: pending
+    status: completed
   - id: camera modes
     content: i/o/p(+과제 o/p) 목표 pose + camera position lerp + quaternion slerp; Space/orbit과 충돌 최소 분기
     status: pending
