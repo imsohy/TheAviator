@@ -144,7 +144,7 @@ const KEYBOARD_PLANE_PITCH_TILT = 0.45;
 const KEYBOARD_PLANE_ROLL_TILT = 0.45;
 
 // --- Lab1 skeleton: 전역 (과제 스켈레톤 코드 구성 가이드.md 그대로) ---
-const LAB1_TARGET_STEP = 30.0;
+const LAB1_TARGET_STEP = 60.0;
 const targetPos = new THREE.Vector3();
 const startQuat = new THREE.Quaternion();
 const midQuat = new THREE.Quaternion();
