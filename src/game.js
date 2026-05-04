@@ -26,11 +26,16 @@ const Colors = {
 };
 
 /** 비행기 위치(translation) 전용 부모. 자식으로 `airplane.mesh`(회전)와 1인칭 카메라를 두면 기체 roll/pitch가 카메라에 전달되지 않음. */
+/** Lab1 O·Legacy Space 1인칭: mesh에 완전 고정(roll/pitch 그대로). 코가 보이도록 약간 더 위·뒤(로컬 −X) */
 const FIRST_PERSON_CAMERA_LOCAL = {
-  position: new THREE.Vector3(8 - 100, 7, 0),
-  /** 이전(Math.PI/2) 대비 수평 시선 180° 반대 */
+  position: new THREE.Vector3(11, 44, 0),
   rotation: new THREE.Euler(0, -Math.PI / 2, 0),
 };
+
+/** Lab1 K: 기체 위치 동행 + 월드 위·살짝 뒤, 시선은 비행 전방(+X) */
+const FOLLOW_CAM_UP_OFFSET = 30;
+const FOLLOW_CAM_BACK_OFFSET = 28;
+const FOLLOW_CAM_LOOK_AHEAD = 500;
 
 // GAME VARIABLES
 let game;
@@ -128,8 +133,22 @@ let renderer;
 let container;
 let orbitControls;
 let composer;
-/** `'third'` | `'first'` | `'orbit'` — Space로 순환 */
+/** `'third'` | `'first'` | `'orbit'` — Space로 순환(단, `legacyViewSwitchingEnabled`일 때만) */
 let viewMode = 'third';
+
+/** Space로 third↔first↔orbit 순환 — 기본 끔. HTML `legacyViewToggleBtn`으로만 켬. */
+let legacyViewSwitchingEnabled = false;
+
+/** Lab1: I=third, O=cockpit(100% 1인칭), P=top, K=follow(위에서 동행) — third/top만 lerp/slerp, O·K는 매 프레임 스냅 */
+let lab1CamActivePreset = null;
+const lab1CamTargetPos = new THREE.Vector3();
+const lab1CamTargetQuat = new THREE.Quaternion();
+const _lab1CamLookMtx = new THREE.Matrix4();
+const _WORLD_UP = new THREE.Vector3(0, 1, 0);
+const _qFpLocal = new THREE.Quaternion();
+const _qMeshWorld = new THREE.Quaternion();
+const _camFollowForward = new THREE.Vector3();
+const _camFollowLookAt = new THREE.Vector3();
 
 // SCREEN & MOUSE VARIABLES
 
@@ -264,7 +283,7 @@ function detachCameraPreserveWorld() {
 function applyThirdPersonCamera() {
   detachCameraPreserveWorld();
   getPlaneWorldPosition(_planeWorldPositionScratch);
-  camera.position.set(0, _planeWorldPositionScratch.y, 200);
+  camera.position.set(0, _planeWorldPositionScratch.y, 235);
   camera.rotation.set(0, 0, 0);
   camera.updateProjectionMatrix();
 }
@@ -305,10 +324,82 @@ function cycleViewMode() {
   }
 }
 
+/** Lab1 I/O/P 전: orbit 끄고, legacy 1인칭이면 카메라를 mesh에서 떼 월드로 둔다. */
+function detachCameraForLabIOP() {
+  orbitControls.enabled = false;
+  if (viewMode === 'first') {
+    detachCameraPreserveWorld();
+    viewMode = 'third';
+  }
+}
+
+/** I/O/P 공통: 매 프레임 목표 월드 pose를 정한 뒤 카메라를 lerp/slerp(쿼터니언으로 자연스럽게 이어짐). */
+function updateLab1CameraIOP() {
+  if (lab1CamActivePreset === null || !camera || !airplane?.mesh || game.status !== 'playing') return;
+
+  camera.fov = normalize(mousePos.x, -1, 1, 40, 80);
+  getPlaneWorldPosition(_planeWorldPositionScratch);
+  const p = _planeWorldPositionScratch;
+
+  if (lab1CamActivePreset === 'third') {
+    lab1CamTargetPos.set(0, p.y, 235);
+    lab1CamTargetQuat.identity();
+  } else if (lab1CamActivePreset === 'follow') {
+    airplane.mesh.getWorldQuaternion(_qMeshWorld);
+    _camFollowForward.set(1, 0, 0).applyQuaternion(_qMeshWorld).normalize();
+    lab1CamTargetPos.copy(p);
+    lab1CamTargetPos.addScaledVector(_WORLD_UP, FOLLOW_CAM_UP_OFFSET);
+    lab1CamTargetPos.addScaledVector(_camFollowForward, -FOLLOW_CAM_BACK_OFFSET);
+    _camFollowLookAt.copy(lab1CamTargetPos).addScaledVector(_camFollowForward, FOLLOW_CAM_LOOK_AHEAD);
+    _lab1CamLookMtx.lookAt(lab1CamTargetPos, _camFollowLookAt, _WORLD_UP);
+    lab1CamTargetQuat.setFromRotationMatrix(_lab1CamLookMtx);
+  } else if (lab1CamActivePreset === 'cockpit') {
+    lab1CamTargetPos.copy(FIRST_PERSON_CAMERA_LOCAL.position);
+    airplane.mesh.localToWorld(lab1CamTargetPos);
+    airplane.mesh.getWorldQuaternion(_qMeshWorld);
+    _qFpLocal.setFromEuler(FIRST_PERSON_CAMERA_LOCAL.rotation);
+    lab1CamTargetQuat.copy(_qMeshWorld).multiply(_qFpLocal);
+  } else if (lab1CamActivePreset === 'top') {
+    lab1CamTargetPos.set(p.x, p.y + 420, p.z);
+    _lab1CamLookMtx.lookAt(lab1CamTargetPos, p, _WORLD_UP);
+    lab1CamTargetQuat.setFromRotationMatrix(_lab1CamLookMtx);
+  }
+
+  // O·K: 위치/시선을 매 프레임 목표에 맞춤(WASD 지연 없음). I·P만 부드럽게 블렌드.
+  if (lab1CamActivePreset === 'follow' || lab1CamActivePreset === 'cockpit') {
+    camera.position.copy(lab1CamTargetPos);
+    camera.quaternion.copy(lab1CamTargetQuat);
+  } else {
+    const k = Math.min(1, (5 * deltaTime) / 1000);
+    camera.position.lerp(lab1CamTargetPos, k);
+    camera.quaternion.slerp(lab1CamTargetQuat, k);
+  }
+  camera.updateProjectionMatrix();
+}
+
 function handleKeyDown(event) {
   if (event.code === 'Space') {
     event.preventDefault();
+    if (lab1CamActivePreset !== null) {
+      lab1CamActivePreset = null;
+      orbitControls.enabled = false;
+      applyThirdPersonCamera();
+      viewMode = 'third';
+      return;
+    }
+    if (!legacyViewSwitchingEnabled) return;
     cycleViewMode();
+    return;
+  }
+  if (event.code === 'KeyI' || event.code === 'KeyO' || event.code === 'KeyP' || event.code === 'KeyK') {
+    if (game.status !== 'playing') return;
+    event.preventDefault();
+    detachCameraForLabIOP();
+    if (event.code === 'KeyI') lab1CamActivePreset = 'third';
+    else if (event.code === 'KeyO') lab1CamActivePreset = 'cockpit';
+    else if (event.code === 'KeyP') lab1CamActivePreset = 'top';
+    else lab1CamActivePreset = 'follow';
+    viewMode = 'third';
     return;
   }
   if (event.code === 'KeyW' || event.code === 'KeyS' || event.code === 'KeyA' || event.code === 'KeyD') {
@@ -994,6 +1085,7 @@ function lab1ResetPlaneState() {
   targetQuat.identity();
   airplane.mesh.quaternion.identity();
   airplane.mesh.rotation.set(0, 0, 0);
+  lab1CamActivePreset = null;
 }
 
 function createPlane() {
@@ -1336,7 +1428,9 @@ function updatePlane() {
   game.planeCollisionSpeedY += (0 - game.planeCollisionSpeedY) * deltaTime * 0.03;
   game.planeCollisionDisplacementY += (0 - game.planeCollisionDisplacementY) * deltaTime * 0.01;
 
-  if (viewMode === 'third') {
+  if (lab1CamActivePreset !== null) {
+    updateLab1CameraIOP();
+  } else if (viewMode === 'third') {
     // 마우스 X에 따라 시야각(FOV) 변경
     camera.fov = normalize(mousePos.x, -1, 1, 40, 80);
     camera.updateProjectionMatrix();
@@ -1395,6 +1489,23 @@ function init() {
   document.addEventListener('touchend', handleTouchEnd, false);
   document.addEventListener('keydown', handleKeyDown, false);
   document.addEventListener('keyup', handleKeyUp, false);
+
+  const legacyBtn = document.getElementById('legacyViewToggleBtn');
+  if (legacyBtn) {
+    legacyBtn.addEventListener('click', () => {
+      legacyViewSwitchingEnabled = !legacyViewSwitchingEnabled;
+      if (legacyViewSwitchingEnabled && lab1CamActivePreset !== null) {
+        lab1CamActivePreset = null;
+        orbitControls.enabled = false;
+        applyThirdPersonCamera();
+        viewMode = 'third';
+      }
+      legacyBtn.textContent = legacyViewSwitchingEnabled
+        ? 'Legacy view switching: ON'
+        : 'Legacy view switching: OFF';
+      legacyBtn.setAttribute('aria-pressed', legacyViewSwitchingEnabled ? 'true' : 'false');
+    });
+  }
 
   loop();
 }

@@ -180,3 +180,25 @@
 		letter-spacing: 0.65em;
 	}
 }
+
+/* Lab1: Space로 third↔first↔orbit — 기본 비활성, 버튼으로만 활성화 */
+.legacy-view-toggle {
+	position: fixed;
+	top: 12px;
+	right: 12px;
+	z-index: 1000;
+	font-size: 11px;
+	line-height: 1.3;
+	padding: 8px 12px;
+	cursor: pointer;
+	background: rgba(255, 255, 255, 0.9);
+	border: 1px solid #d1b790;
+	border-radius: 4px;
+	color: #59332e;
+	font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+	max-width: 11rem;
+	text-align: left;
+}
+.legacy-view-toggle:hover {
+	background: #fff;
+}

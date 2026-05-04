@@ -10,7 +10,7 @@ todos:
     status: cancelled
   - id: camera modes
     content: i/o/p(+과제 o/p) 목표 pose + camera position lerp + quaternion slerp; Space/orbit과 충돌 최소 분기
-    status: cancelled
+    status: completed
   - id: submission path
     content: lab1_[이름].html/js 및 빌드/rename 절차 정리 (교안 템플릿 수령 후 경로 일치)
     status: cancelled
@@ -22,6 +22,17 @@ todos:
     status: pending
 isProject: false
 ---
+
+# 완료 재점검 (요약)
+
+| 항목 | 상태 |
+|------|------|
+| 스켈레톤 translation (targetPos, 0.1 보간, y=100 시작) | 완료 |
+| 스켈레톤 rotation (start/mid/end/target quaternion, SLERP) | 두 브랜치 각각 구현 방식 상이 — Notion `7. 중요해보이는 것 메모 — Rotation…` 참고 |
+| 충돌 등 mesh 월드 정합 (`getPlaneWorldPosition`) | 완료 |
+| **Step3 카메라 I/O/P** (목표 pose lerp + quat slerp, Space로 Lab 모드 해제) | **완료** (`game.js` Lab1 step3 블록) |
+| 제출용 lab1_[이름].html/js·zip | 미정 (교안 템플릿 수령 후) |
+| Demo 모드 | pending (본 문서 §8) |
 
 # 과제1 코드 구현 계획 (스켈레톤 우선 / 기존 코드 최소 변경)
 
