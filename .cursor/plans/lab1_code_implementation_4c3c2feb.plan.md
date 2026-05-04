@@ -4,21 +4,21 @@ overview: Notion「4. Skeleton 맞춤 수정 체크리스트」와 동일한 방
 todos:
   - id: align coords
     content: "Fix plane init + airplane.mesh vs airplaneRig: 스켈레톤 줄 유지, 월드 좌표는 getWorldPosition 헬퍼로 충돌/코인에 반영"
-    status: completed
+    status: cancelled
   - id: paste skeleton
     content: 전역 quaternion/Vector3/state + keydown 30-step + updatePlane 블록을 과제 규격 그대로 삽입; propeller 중복 회전만 최소 조정
-    status: completed
+    status: cancelled
   - id: camera modes
     content: i/o/p(+과제 o/p) 목표 pose + camera position lerp + quaternion slerp; Space/orbit과 충돌 최소 분기
-    status: pending
+    status: cancelled
   - id: submission path
     content: lab1_[이름].html/js 및 빌드/rename 절차 정리 (교안 템플릿 수령 후 경로 일치)
-    status: pending
+    status: cancelled
   - id: branch polish
     content: baseline 동작 확인 후 별도 브랜치에서 if/else 개선만
-    status: pending
+    status: cancelled
   - id: demo mode
-    content: "오른쪽 상단 버튼으로 게임 시작 후 Demo on 시 코인/적 등 충돌·점수 오브젝트 비가시+로직 생략, 바다 lava 셰이더 off"
+    content: 오른쪽 상단 버튼으로 게임 시작 후 Demo on 시 코인/적 등 충돌·점수 오브젝트 비가시+로직 생략, 바다 lava 셰이더 off
     status: pending
 isProject: false
 ---

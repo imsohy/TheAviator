@@ -42,11 +42,12 @@ const particlesPool = [];
 function resetGame() {
   game = {
     speed: 0,
-    initSpeed: 0.00035,
-    baseSpeed: 0.00035,
-    targetBaseSpeed: 0.00035,
-    incrementSpeedByTime: 0.0000025,
-    incrementSpeedByLevel: 0.000005,
+    // d92f... 원본 체감에 맞춰 전체 진행 속도 기본값을 소폭 낮춤
+    initSpeed: 0.00028,
+    baseSpeed: 0.00028,
+    targetBaseSpeed: 0.00028,
+    incrementSpeedByTime: 0.0000020,
+    incrementSpeedByLevel: 0.000004,
     distanceForSpeedUpdate: 100,
     speedLastUpdate: 0,
 
@@ -66,9 +67,12 @@ function resetGame() {
     planeRotXSensivity: 0.0008,
     planeRotZSensivity: 0.0004,
     planeFallSpeed: 0.001,
-    planeMinSpeed: 1.2,
-    planeMaxSpeed: 1.6,
-    planeSpeed: 0,
+    // planeSpeed는 game.speed(진행/회전 속도)에 곱해지므로 범위를 과하게 키우면 오브젝트가 과속으로 돎.
+    // d92f...에서 mousePos.x의 평균이 중앙 근처였던 점을 고려해, 키보드(targetPos) 기반에서는 범위를 보수적으로 둠.
+    planeMinSpeed: 1.0,
+    planeMaxSpeed: 1.3,
+    // 초기에는 "도착 상태"에 가깝게 시작(스텝 입력 전 급가속 느낌 방지)
+    planeSpeed: 1.0,
     planeCollisionDisplacementX: 0,
     planeCollisionSpeedX: 0,
 
@@ -146,7 +150,7 @@ const startQuat = new THREE.Quaternion();
 const midQuat = new THREE.Quaternion();
 const endQuat = new THREE.Quaternion();
 const targetQuat = new THREE.Quaternion();
-/** 비행 메시 기준 평형 자세 (항상 identity). mutate 금지. */
+/** Lab1: **수평 비행 orientation**을 담는 상수 quaternion `LAB1_LEVEL_QUAT`(이 구현에서는 회전 없음 = **identity**). mutate 하지 않고 SLERP 끝점으로만 씀. */
 const LAB1_LEVEL_QUAT = new THREE.Quaternion();
 let slerpT = 0;
 
@@ -159,9 +163,8 @@ const SEA_MERGE_VERTICES_TOLERANCE = 1e-4;
 /**
  * 바다 **메시 전체**가 도는 속도만 `game.speed` 대비 줄이기 (0~1). 1이면 구버전과 동일 비율.
  * 정점 파도·용암 셰이더와는 별개. `talktocursor/SEA_WAVES_AND_ROTATION.md`, `talktocursor/SEA_LAVA_SHADER.md` 참고.
- * 1에 가까울수록 코인·적과 같은 `game.speed` 체감; 너무 낮으면 세계만 느리게 보임.
  */
-const SEA_MESH_ROTATION_SCALE = 1;
+const SEA_MESH_ROTATION_SCALE = 0.25;
 
 /** Lava Bloom (global postprocess). Tune if too strong. */
 const LAVA_BLOOM = {
@@ -321,6 +324,14 @@ function handleKeyUp(event) {
   }
 }
 
+/** Lab1: `targetPos`를 mesh가 실제로 도달 가능한 Y/Z 범위로 맞춤. 밖에 두면 clamp된 위치와의 거리만으로는 "이동이 끝난 것"처럼 보여 orientation SLERP가 멈춘 것처럼 보일 수 있음. */
+function lab1ClampTargetPosToPlayBounds() {
+  const yMin = game.planeDefaultHeight - game.planeAmpHeight;
+  const yMax = game.planeDefaultHeight + game.planeAmpHeight;
+  targetPos.y = THREE.MathUtils.clamp(targetPos.y, yMin, yMax);
+  targetPos.z = THREE.MathUtils.clamp(targetPos.z, -KEYBOARD_PLANE_Z_LIMIT, KEYBOARD_PLANE_Z_LIMIT);
+}
+
 /** Lab1 skeleton: keydown 시 targetPos·쿼터니언 (실습 30.0 스텝) */
 function lab1OnPlaneKeyDown(code) {
   if (!airplane?.mesh || game.status !== 'playing') return;
@@ -333,6 +344,7 @@ function lab1OnPlaneKeyDown(code) {
   if (code === 'KeyD') dz += step;
   if (code === 'KeyA') dz -= step;
   targetPos.set(p.x, p.y + dy, p.z + dz);
+  lab1ClampTargetPosToPlayBounds();
 
   slerpT = 0;
 
@@ -344,7 +356,7 @@ function lab1OnPlaneKeyDown(code) {
   if (dz !== 0) {
     qRoll.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(dz) * KEYBOARD_PLANE_ROLL_TILT);
   }
-  // 레벨 기준 절대 은행 — 현재 자세에 곱하지 않음(연타 시 pitch/roll 누적·과회전 방지).
+  // 이번 keydown에 대한 **입력 목표 orientation**을 `targetQuat`에 넣음: 수평 비행 orientation과 같게 identity로 둔 뒤, pitch·roll quaternion만 곱해 한 번에 구성(현재 mesh.quaternion에 누적 곱하지 않음 — 연타 시 과회전 완화).
   targetQuat.identity();
   targetQuat.multiply(qPitch).multiply(qRoll);
 }
@@ -1083,9 +1095,8 @@ function loop() {
     updateDistance();
     updateEnergy();
     game.baseSpeed += (game.targetBaseSpeed - game.baseSpeed) * deltaTime * 0.02;
-    // Lab1: targetPos 이동 중에도 nearTarget이 자주 true가 되어 planeMinSpeed가 먹히면
-    // game.speed까지 떨어져 세계 전체가 체감상 크게 느려진다. 진행 속도는 max 기준 유지.
-    game.speed = game.baseSpeed * game.planeMaxSpeed;
+    // 원작: `planeSpeed`(목표 근접 등)로 전체 진행 체감도 함께 바뀜. 느려짐 체감은 프레임/CPU 쪽(루프 최적화)과 별개로 볼 것.
+    game.speed = game.baseSpeed * game.planeSpeed;
   } else if (game.status == 'gameover') {
     game.speed *= 0.99;
     airplane.mesh.rotation.z += (-Math.PI / 2 - airplane.mesh.rotation.z) * 0.0002 * deltaTime;
@@ -1102,6 +1113,8 @@ function loop() {
     // waiting
   }
 
+  // --- 프로펠러: 시간 기반 추가 회전 (원작 The Aviator 잔여. 목적 = 시각적 RPM 보조) ---
+  // `game.planeSpeed`는 updatePlane의 nearTarget에서 갱신되며, 위의 `game.speed`와 이 줄 둘 다에 반영됨.
   airplane.propeller.rotation.x += game.planeSpeed * deltaTime * 0.005;
   sea.mesh.rotation.z += game.speed * deltaTime * SEA_MESH_ROTATION_SCALE;
 
@@ -1160,40 +1173,91 @@ function removeEnergy() {
   game.energy = Math.max(0, game.energy);
 }
 
-/** Lab1 skeleton: WASD는 keydown·targetPos (keysDown 미사용) */
+/** Lab1 skeleton */
 function updatePlane() {
-  const tol = 0.75;
-  const nearTarget =
-    airplane &&
-    Math.abs(airplane.mesh.position.y - targetPos.y) < tol &&
-    Math.abs(airplane.mesh.position.z - targetPos.z) < tol;
-  game.planeSpeed = nearTarget ? game.planeMinSpeed : game.planeMaxSpeed;
+  // ---------------- planeSpeed LERP 계산 -------------------
+  // 원리 설명:
+  //
+  // game.planeSpeed란?
+  // `game.speed = game.baseSpeed * game.planeSpeed` 에서 쓰이는 값으로,
+  // "게임이 얼마나 빨리 진행되는지" (바다/코인/적 회전, 거리/에너지 변화 등)의 배율입니다.
+  // 원본(The Aviator)은 mousePos.x를 normalize해서 planeSpeed가 1.0~1.3처럼 연속적으로 변한다.
+  // Lab1(keydown WASD)은 매 프레임 입력이 아니라 **keydown 순간에 목표점 `targetPos`를 갱신**하고,
+  // 그 다음 프레임들에서는 비행기가 `targetPos` 으로 부드럽게 이동합니다(0.1 보간). 그래서 여기서는
+  // `현재 위치 ↔ targetPos` 사이의 남은 거리로 **planeSpeed를 lerp로 계산**해서 즉시 반영합니다.
+  // 
+  // u란? 
+  // u는 posErr를 0~1로 바꾼 "상태 값"입니다.
+  // - posErr=0 → u=0 (목표 도착) → planeSpeed=planeMinSpeed
+  // - posErr가 커질수록 u→1 (이동 중) → planeSpeed→planeMaxSpeed
+  // smoothstep은 "posErr를 0~1로 바꾸는 방법" 중 하나입니다:
+  // - posErr <= 0 이면 u=0
+  // - posErr >= (LAB1_TARGET_STEP*2) 이면 u=1
+  //   ※ 상한을 STEP×1로 잡으면, 키 한 번(목표가 약 STEP만큼 바뀜) 직후 posErr가 곧바로 u=1에 닿아 planeSpeed가 max로 튀기 쉽다.
+  //     상한을 STEP에 맞춘 **2배**로 두면 “대략 두 칸 분량 이상 멀 때”를 완전 이동 중으로 보는 척도가 되어, 한 칸 입력과 체감이 덜 날카롭다(값은 튜닝).
+  // - 그 사이는 직선(posErr / maxErr) 대신 S자 곡선으로 바꿔서,
+  //   u가 0에서 시작할 때/1에 도착할 때 갑자기 꺾이지 않게(급변 감소) 만듭니다.
 
-  if (viewMode !== 'orbit') {
-    // --- Lab1 skeleton: updatePlane (과제 스켈레톤 코드 구성 가이드.md 예시) ---
-    var targetY = targetPos.y;
-    var targetZ = targetPos.z;
+  // 알고리즘 설명
+  // 0) Lab1: `targetPos`를 mesh가 도달 가능한 Y/Z 범위로 제한 — 밖에 두면 위치 오차·orientation 블렌드가 왜곡될 수 있음.
+  // 1) "목표(targetPos)까지 얼마나 남았나"를 숫자(posErr)로 만든다.
+  // 2) 그 숫자를 0~1 범위(u)로 바꾼다. (0=도착, 1=이동 중)
+  // 3) u로 planeSpeed를 min~max 사이에서 LERP한다.
+  // 결과: 목표에 가까울수록 planeSpeed↓(min), 멀수록 planeSpeed↑(max) → game.speed(전체 진행/회전)도 같은 방향으로 변함.
+  lab1ClampTargetPosToPlayBounds();
+  const dy = Math.abs(airplane.mesh.position.y - targetPos.y); // Y 방향: 목표까지 남은 거리
+  const dz = Math.abs(airplane.mesh.position.z - targetPos.z); // Z 방향: 목표까지 남은 거리
+  const posErr = Math.max(dy, dz); // 대표 오차(둘 중 하나라도 멀면 아직 이동 중이므로 큰 값 채택)
+  const u = THREE.MathUtils.smoothstep(posErr, 0, LAB1_TARGET_STEP * 2); // posErr→u; 구간 [0, STEP×2] 설명은 위 주석
+  game.planeSpeed = THREE.MathUtils.lerp(game.planeMinSpeed, game.planeMaxSpeed, u);  // 최종: u로 min~max 사이를 선형보간(lerp)해 planeSpeed를 결정
+
+
+  if (viewMode !== 'orbit') { 
+    // ------------- 키보드 조종: translation + quaternion rotation ------------------
+    // - translation: `targetPos`로 mesh.local Y/Z를 매 프레임 보간 이동
+    // - quaternion rotation: 과제 핵심인 SLERP(구면 선형 보간)로 orientation을 갱신 — 아래 (B) 참고
+    // orbit 모드에서는 OrbitControls(관전) 위주로 두기 위해, 이 조종 블록은 실행하지 않음
+    
+    // --- (A) Translation: targetPos를 향해 부드럽게 이동 ---
+    // 1차 지수 보간(지수 평활): 남은 거리의 일정 비율(여기서는 10%)만 매 프레임 따라가면, 오버슈트 없이 지수적으로 수렴합니다.
+    // 비고: skeleton code 유지
+    var targetY = targetPos.y; // WASD 입력으로 정해 둔 목표 Y (mesh.local)
+    var targetZ = targetPos.z; // WASD 입력으로 정해 둔 목표 Z (mesh.local)
 
     // Move the plane at each frame by adding a fraction of the remaining distance
+    // 남은 거리의 10%만큼만 이동 → 1차 지수 보간(지수 평활)으로 목표에 수렴
+    // 비고: skeleton code 유지
     airplane.mesh.position.y += (targetY - airplane.mesh.position.y) * 0.1;
     airplane.mesh.position.z += (targetZ - airplane.mesh.position.z) * 0.1;
 
-    // t 를 구하는 아래 부분은 원하는대로 수정 가능
-    // target position 에 위치했을 때, 비행기가 평형상태에 오도록
+    // --- (B) Rotation: SLERP로 orientation 보간 (과제 근본 목적) ---
+    // SLERP(Spherical Linear Interpolation): 단위 quaternion 둘 q0, q1과 실수 t∈[0,1]에 대해,
+    // 단위 quaternion은 4차원 구 S³ 위의 점으로 볼 수 있고, SLERP는 그 구 위의 **대원호(최단 경로)** 를 따라 q0에서 q1로 t만큼 진행한 orientation을 준다(과도한 꼬임을 피하려면 보통 짧은 쪽 호를 고름).
+    // Three.js에서는 `Quaternion.slerpQuaternions(q0, q1, t)`가 그 결과를, `q.slerp(q1, α)`는 현재 q에서 q1로 α만큼 SLERP한 결과를 넣는다.
+    //
+    // 여기서는 (1) **수평 비행 orientation**(`LAB1_LEVEL_QUAT`, 이 프로젝트에서는 identity quaternion)과 **입력 목표 orientation**(`targetQuat`) 사이를 orientBlendT로 SLERP해 midQuat을 만들고,
+    // (2) 매 프레임 mesh.quaternion을 midQuat 쪽으로 orientAlpha만큼 또 SLERP해 부드럽게 따라가게 한다.
+    // orientBlendT는 "이동이 많이 남았을수록 입력 목표 orientation 쪽 SLERP를 더 쓴다"는 스칼라 매개변수로만 쓰이며, 위치 오차로부터 계산한다.
     let tY = Math.abs(airplane.mesh.position.y - targetY);
     let tZ = Math.abs(airplane.mesh.position.z - targetZ);
 
-    // posErr 클수록 targetQuat(이번 입력 은행)에 가깝고, 목표에 가까워질수록 LAB1_LEVEL_QUAT(평형)에 가까운 목표 자세.
-    // 2단계(midQuat→identity) 분리 제거: t>0.5에서 1단계 스킵·midQuat 정체되는 문제와 연타 누적을 같이 해소.
-    const posErr = Math.max(tY, tZ);
-    const bankWeight = Math.min(1, posErr / (LAB1_TARGET_STEP * 0.32));
-    midQuat.slerpQuaternions(LAB1_LEVEL_QUAT, targetQuat, bankWeight);
-    const orientAlpha = Math.min(1, (10 * deltaTime) / 1000);
-    airplane.mesh.quaternion.slerp(midQuat, orientAlpha);
-    airplane.mesh.quaternion.normalize();
+    const orientMotionErr = Math.max(tY, tZ); // orientBlendT를 정하기 위한 스칼라(남은 Y/Z 이동량의 대표값)
+    const orientBlendT = Math.min(1, orientMotionErr / (LAB1_TARGET_STEP * 0.32)); // [0,1] — 위 SLERP의 t
+    midQuat.slerpQuaternions(LAB1_LEVEL_QUAT, targetQuat, orientBlendT); // SLERP: 수평 비행 orientation → 입력 목표 orientation, t = orientBlendT
+    const orientAlpha = Math.min(1, (10 * deltaTime) / 1000); // 두 번째 SLERP의 α(프레임당 회전량 상한)
+    airplane.mesh.quaternion.slerp(midQuat, orientAlpha); // SLERP: 현재 mesh.quaternion → midQuat
+    airplane.mesh.quaternion.normalize(); // 누적 오차로 단위(quaternion length=1)가 흐트러지는 것 방지
 
+    // --- (C) Propeller: '항상 돌아가는' 기본 회전(프레임당 고정 증가) ---
+    // 원리: 매 프레임 일정 각도를 더해 시각적으로 기본 RPM을 만들고,
+    // loop의 `planeSpeed * deltaTime` 보조 항과 합쳐 최종 회전 속도(=RPM 느낌)가 됩니다.
+    // 비고: 과제 예시 `+= 0.2` 유지.
     airplane.propeller.rotation.x += 0.2;
 
+    // --- (D) Clamp: mesh Y/Z를 허용 범위로 자름 ---
+    // 여기서 하는 일: `airplane.mesh.position`의 Y·Z만 위·아래·좌·우 한계로 clamp.
+    // `lab1ClampTargetPosToPlayBounds`에서 하는 일: 목표점 `targetPos`의 Y·Z만 같은 한계로 clamp(updatePlane 맨 앞·keydown).
+    // 둘은 대상이 다름(메시 위치 vs 목표점). 보간·충돌 등으로 mesh만 박스 밖으로 나갈 수 있어서, 여기서 mesh를 다시 자른다.
     const yMin = game.planeDefaultHeight - game.planeAmpHeight;
     const yMax = game.planeDefaultHeight + game.planeAmpHeight;
     airplane.mesh.position.y = THREE.MathUtils.clamp(airplane.mesh.position.y, yMin, yMax);
@@ -1204,29 +1268,33 @@ function updatePlane() {
     );
   }
 
+  // --- 충돌 시 밀려난 만큼을 속도/변위에 누적(원작 The Aviator 로직) ---
   game.planeCollisionDisplacementX += game.planeCollisionSpeedX;
   game.planeCollisionDisplacementY += game.planeCollisionSpeedY;
 
-  const colTargetX = game.planeCollisionDisplacementX;
-  const colTargetY = airplane.mesh.position.y + game.planeCollisionDisplacementY;
+  const colTargetX = game.planeCollisionDisplacementX; // rig가 따라가야 할 X 목표
+  const colTargetY = airplane.mesh.position.y + game.planeCollisionDisplacementY; // mesh Y + 충돌 Y 오프셋
 
+  // rig는 전체 기체 위치(X), mesh Y는 충돌 반동까지 합쳐서 부드럽게 보간
   airplaneRig.position.x += (colTargetX - airplaneRig.position.x) * deltaTime * game.planeMoveSensivity;
   airplane.mesh.position.y += (colTargetY - airplane.mesh.position.y) * deltaTime * game.planeMoveSensivity;
 
+  // 충돌 속도·변위를 0 쪽으로 감쇠 → 정지 시 원래 비행 라인으로 복귀
   game.planeCollisionSpeedX += (0 - game.planeCollisionSpeedX) * deltaTime * 0.03;
   game.planeCollisionDisplacementX += (0 - game.planeCollisionDisplacementX) * deltaTime * 0.01;
   game.planeCollisionSpeedY += (0 - game.planeCollisionSpeedY) * deltaTime * 0.03;
   game.planeCollisionDisplacementY += (0 - game.planeCollisionDisplacementY) * deltaTime * 0.01;
 
   if (viewMode === 'third') {
+    // 마우스 X에 따라 시야각(FOV) 변경
     camera.fov = normalize(mousePos.x, -1, 1, 40, 80);
     camera.updateProjectionMatrix();
-    getPlaneWorldPosition(_planeWorldPositionScratch);
+    getPlaneWorldPosition(_planeWorldPositionScratch); // 비행기 월드 Y(충돌 보정 반영)
     camera.position.y +=
-      (_planeWorldPositionScratch.y - camera.position.y) * deltaTime * game.cameraSensivity;
+      (_planeWorldPositionScratch.y - camera.position.y) * deltaTime * game.cameraSensivity; // 카메라 높이가 기체를 부드럽게 추적
   }
 
-  airplane.pilot.updateHairs();
+  airplane.pilot.updateHairs(); // 속도에 맞춰 파일럿 머리카락 흔들림
 }
 
 function showReplay() {
