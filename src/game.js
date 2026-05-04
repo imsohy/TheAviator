@@ -147,6 +147,8 @@ const KEYBOARD_PLANE_ROLL_TILT = 0.45;
 const LAB1_TARGET_STEP = 30.0;
 const targetPos = new THREE.Vector3();
 const startQuat = new THREE.Quaternion();
+const midQuat = new THREE.Quaternion();
+let currentMoveDistance = LAB1_TARGET_STEP;
 /** 과제 가이드: 수평(레벨) 쪽 끝 orientation — 리셋 시 identity만 두고, 매 프레임 multiply 등으로 mutate 하지 않음. */
 const endQuat = new THREE.Quaternion();
 const targetQuat = new THREE.Quaternion();
@@ -344,18 +346,22 @@ function lab1OnPlaneKeyDown(code) {
   if (code === 'KeyA') dz -= step;
   targetPos.set(p.x, p.y + dy, p.z + dz);
   lab1ClampTargetPosToPlayBounds();
+  const actualDy = targetPos.y - p.y;
+  const actualDz = targetPos.z - p.z;
+  currentMoveDistance = Math.max(Math.abs(actualDy), Math.abs(actualDz), 1);
 
 
-  // 과제 가이드: targetQuat은 setFromAxisAngle로 설정(한 축만 쓸 때는 targetQuat에 직접 호출, 대각은 축 각각 setFromAxisAngle 후 곱).
-  if (dy !== 0 && dz === 0) {
-    targetQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(dy) * KEYBOARD_PLANE_PITCH_TILT);
-  } else if (dz !== 0 && dy === 0) {
-    targetQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(dz) * KEYBOARD_PLANE_ROLL_TILT);
-  } else if (dy !== 0 && dz !== 0) {
+  if (actualDy !== 0 && actualDz === 0) {
+    targetQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(actualDy) * KEYBOARD_PLANE_PITCH_TILT);
+  } else if (actualDz !== 0 && actualDy === 0) {
+    targetQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(actualDz) * KEYBOARD_PLANE_ROLL_TILT);
+  } else if (actualDy !== 0 && actualDz !== 0) {
     const qPitch = new THREE.Quaternion();
     const qRoll = new THREE.Quaternion();
-    qPitch.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(dy) * KEYBOARD_PLANE_PITCH_TILT);
-    qRoll.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(dz) * KEYBOARD_PLANE_ROLL_TILT);
+  
+    qPitch.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(actualDy) * KEYBOARD_PLANE_PITCH_TILT);
+    qRoll.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(actualDz) * KEYBOARD_PLANE_ROLL_TILT);
+  
     targetQuat.copy(qPitch).multiply(qRoll);
   } else {
     targetQuat.identity();
@@ -1226,43 +1232,71 @@ function updatePlane() {
     // 비고: skeleton code 유지
     airplane.mesh.position.y += (targetY - airplane.mesh.position.y) * 0.1;
     airplane.mesh.position.z += (targetZ - airplane.mesh.position.z) * 0.1;
-
-    // --- (B) Rotation: SLERP로 orientation 보간 (과제 근본 목적) ---
-    // SLERP(Spherical Linear Interpolation): 단위 quaternion 둘 q0, q1과 실수 t∈[0,1]에 대해,
-    // 단위 quaternion은 4차원 구 S³ 위의 점으로 볼 수 있고, SLERP는 그 구 위의 **대원호(최단 경로)** 를 따라 q0에서 q1로 t만큼 진행한 orientation을 준다(과도한 꼬임을 피하려면 보통 짧은 쪽 호를 고름).
-    // Three.js에서는 `Quaternion.slerpQuaternions(q0, q1, t)`가 그 결과를, `q.slerp(q1, α)`는 현재 q에서 q1로 α만큼 SLERP한 결과를 넣는다.
+    // --- (B) Rotation: SLERP로 orientation 보간 (과제 핵심) ------------------
+    // 목표:
+    // - keydown 순간의 자세(startQuat)에서, 입력 방향에 맞는 목표 자세(targetQuat)로 부드럽게 기울인다.
+    // - 목표 위치에 가까워질수록, 목표 자세(targetQuat)에서 수평 자세(endQuat)로 부드럽게 복귀한다.
     //
-    // 과제 요구사항: SLERP는 한 번만 사용하고, t 구간은 if/else로 분기.
-    // 아이디어: 이동 구간에서는 startQuat→targetQuat로 기울이고, 목표 근처에서는 targetQuat→endQuat로 수평 복귀.
-    // 두 구간의 t를 각각 0~1로 정규화하면, 한 번의 slerpQuaternions 호출만으로도 부드러운 orientation 곡선을 만들 수 있다.
+    // 사용 quaternion:
+    // - startQuat  : keydown 순간의 airplane.mesh.quaternion
+    // - targetQuat : keydown 방향에 따라 setFromAxisAngle(...)로 만든 기울어진 자세
+    // - midQuat    : startQuat -> targetQuat 보간 중간에 저장되는 자세
+    // - endQuat    : 최종적으로 돌아갈 수평 자세(identity quaternion)
+    //
+    // SLERP 설명:
+    // - Quaternion.slerpQuaternions(q0, q1, t)는 q0에서 q1까지의 orientation을 t만큼 보간한다.
+    // - 여기서 t는 반드시 0~1 범위로 해석된다.
+    //   t = 0이면 q0, t = 1이면 q1, 그 사이는 두 자세 사이의 부드러운 중간 자세이다.
+    //
+    // 전체 이동 진행률:
+    // - remaining은 현재 위치에서 targetPos까지 남은 거리이다.
+    // - currentMoveDistance는 keydown 시점에 저장해 둔 실제 이동 거리이다.
+    // - 따라서 t = 1 - remaining / currentMoveDistance 로 두면,
+    //   keydown 직후에는 t가 0에 가깝고, 목표 위치에 도착할수록 t가 1에 가까워진다.
     const tY = Math.abs(airplane.mesh.position.y - targetY);
     const tZ = Math.abs(airplane.mesh.position.z - targetZ);
-    const orientMotionErr = Math.max(tY, tZ);
+    const remaining = Math.max(tY, tZ);
 
-    // 남은 거리(오차)를 0~1로 정규화: 1이면 입력 직후(멀리), 0이면 도착 직전(가까움)
-    const errMax = LAB1_TARGET_STEP * 2.0;
-    const movePhase = THREE.MathUtils.clamp(orientMotionErr / errMax, 0, 1);
+    const t = THREE.MathUtils.clamp(1 - remaining / currentMoveDistance, 0, 1);
 
-    let qFrom;
-    let qTo;
-    let orientT;
+    // smoothstep 형태의 easing.
+    // 그냥 t를 써도 되지만, smoothT를 쓰면 회전 시작과 끝이 덜 딱딱하게 보인다.
+    const smoothT = t * t * (3 - 2 * t);
 
-    // 과제 요구사항: t를 if로 분기 + SLERP는 1회만.
-    // split=0.6 이전: start->target(기울이기), 이후: target->level(복원)
-    const split = 0.6;
-    if (movePhase >= split) {
-      const local = THREE.MathUtils.clamp((movePhase - split) / (1 - split), 0, 1);
-      qFrom = startQuat;
-      qTo = targetQuat;
-      orientT = THREE.MathUtils.smoothstep(local, 0, 1);
+    // 전체 이동 구간을 두 단계로 나눈다.
+    // 1단계: smoothT = 0.0 ~ 0.5
+    //   startQuat -> targetQuat
+    //   즉, keydown 당시 자세에서 입력 방향으로 기체를 기울이는 구간.
+    //
+    // 2단계: smoothT = 0.5 ~ 1.0
+    //   targetQuat -> endQuat
+    //   즉, 기울어진 자세에서 다시 수평 자세로 복귀하는 구간.
+    //
+    // 중요한 점:
+    // - slerpQuaternions(q0, q1, t)의 t는 0~1이어야 한다.
+    // - 그런데 1단계에서 smoothT는 0~0.5까지만 변한다.
+    // - 따라서 smoothT / 0.5 를 해서 0~0.5 구간을 0~1 구간으로 다시 매핑한다.
+    // - 2단계도 마찬가지로 (smoothT - 0.5) / 0.5 를 해서 0.5~1.0 구간을 0~1 구간으로 다시 매핑한다.
+    if (smoothT <= 0.5) {
+      // 전체 진행률 0.0~0.5를 첫 번째 SLERP용 진행률 0.0~1.0으로 변환
+      const localT = smoothT / 0.5;
+
+      // 1단계: keydown 당시 자세(startQuat)에서 입력 방향 목표 자세(targetQuat)로 기울인다.
+      airplane.mesh.quaternion.slerpQuaternions(startQuat, targetQuat, localT);
+
+      // 과제 요구사항의 midQuat.
+      // startQuat -> targetQuat 보간 과정에서 현재 중간 자세를 저장한다.
+      midQuat.copy(airplane.mesh.quaternion);
     } else {
-      const local = THREE.MathUtils.clamp((split - movePhase) / split, 0, 1);
-      qFrom = targetQuat;
-      qTo = endQuat;
-      orientT = THREE.MathUtils.smoothstep(local, 0, 1);
+      // 전체 진행률 0.5~1.0을 두 번째 SLERP용 진행률 0.0~1.0으로 변환
+      const localT = (smoothT - 0.5) / 0.5;
+
+      // 2단계: 목표 기울기(targetQuat)에서 수평 자세(endQuat)로 복귀한다.
+      airplane.mesh.quaternion.slerpQuaternions(targetQuat, endQuat, localT);
     }
 
-    airplane.mesh.quaternion.slerpQuaternions(qFrom, qTo, orientT);
+    // 수치 오차 누적 방지.
+    // quaternion은 단위 quaternion이어야 올바른 회전을 표현하므로 normalize 해 둔다.
     airplane.mesh.quaternion.normalize();
 
     // --- (C) Propeller: '항상 돌아가는' 기본 회전(프레임당 고정 증가) ---
