@@ -742,15 +742,16 @@ EnnemiesHolder.prototype.rotateEnnemies = function () {
     ennemy.mesh.rotation.z += Math.random() * 0.1;
     ennemy.mesh.rotation.y += Math.random() * 0.1;
 
-    const diffPos = airplaneRig.position.clone().sub(ennemy.mesh.position);
-    const d = diffPos.length();
+    getPlaneWorldPosition(_planeWorldPositionScratch);
+    _planeCollisionDiffScratch.subVectors(_planeWorldPositionScratch, ennemy.mesh.position);
+    const d = _planeCollisionDiffScratch.length();
     if (d < game.ennemyDistanceTolerance) {
       particlesHolder.spawnParticles(ennemy.mesh.position.clone(), 15, Colors.red, 3);
 
       ennemiesPool.unshift(this.ennemiesInUse.splice(i, 1)[0]);
       this.mesh.remove(ennemy.mesh);
-      game.planeCollisionSpeedX = (100 * diffPos.x) / d;
-      game.planeCollisionSpeedY = (100 * diffPos.y) / d;
+      game.planeCollisionSpeedX = (100 * _planeCollisionDiffScratch.x) / d;
+      game.planeCollisionSpeedY = (100 * _planeCollisionDiffScratch.y) / d;
       ambientLight.intensity = 2;
 
       removeEnergy();
@@ -882,8 +883,9 @@ CoinsHolder.prototype.rotateCoins = function () {
     coin.mesh.rotation.z += Math.random() * 0.1;
     coin.mesh.rotation.y += Math.random() * 0.1;
 
-    const diffPos = airplaneRig.position.clone().sub(coin.mesh.position);
-    const d = diffPos.length();
+    getPlaneWorldPosition(_planeWorldPositionScratch);
+    _planeCollisionDiffScratch.subVectors(_planeWorldPositionScratch, coin.mesh.position);
+    const d = _planeCollisionDiffScratch.length();
     if (d < game.coinDistanceTolerance) {
       const hitPos = coin.mesh.position.clone();
       this.coinsPool.unshift(this.coinsInUse.splice(i, 1)[0]);
@@ -904,6 +906,15 @@ let sea;
 let airplane;
 /** translation만 담당. 자식: `airplane.mesh`(회전), 1인칭 시 `camera` */
 let airplaneRig;
+
+/** Lab1 step1: `airplane.mesh` 월드 좌표 — skeleton에서 mesh Y/Z 보간 시 rig와 달라져도 거리 판정 정합 */
+const _planeWorldPositionScratch = new THREE.Vector3();
+const _planeCollisionDiffScratch = new THREE.Vector3();
+
+function getPlaneWorldPosition(out) {
+  if (!airplane?.mesh) return out.set(0, 0, 0);
+  return airplane.mesh.getWorldPosition(out);
+}
 let sky;
 let coinsHolder;
 let ennemiesHolder;
@@ -914,6 +925,7 @@ function createPlane() {
   airplaneRig.name = 'airPlaneRig';
   airplane = new AirPlane();
   airplane.mesh.scale.set(0.25, 0.25, 0.25);
+  // Lab1 skeleton은 mesh.local Y/Z 보간 가능 — 현재는 mesh 원점·rig에 높이(월드 y=planeDefaultHeight).
   airplane.mesh.position.set(0, 0, 0);
   airplaneRig.position.set(0, game.planeDefaultHeight, 0);
   airplaneRig.add(airplane.mesh);

@@ -1,117 +1,96 @@
 ---
 name: Lab1 code implementation
-overview: "1) 과제 스켈레톤 무수정 붙여넣기 → 2) 과제 요구만 완성. 3) 정식으로 Demo mode(index 오른쪽 위 토글, 코인·적 스폰 차단)까지 포함한다. The Aviator AI 최신화·js/html만 제출 전제로 스켈레톤은 보존. 스켈레톤 밖 최소 연결·카메라 lerp+slerp·lab1_[이름] 경로."
+overview: Notion「4. Skeleton 맞춤 수정 체크리스트」와 동일한 방식으로 game.js를 고친다—전역 상태·createPlane 초기 y/z·keydown(30 step)·updatePlane skeleton 본문·getWorldPosition로 충돌 정합·propeller 중복 제거·카메라 O/P(+I) 보간. 같은 파일에 주석 블록으로 스켈레톤 구간을 고정해 보고서·구술에서 데이터 흐름을 설명 가능하게 한다. Demo 모드·제출 경로·polish 브랜치는 기존 ToDo 유지.
 todos:
-  - id: paste skeleton verbatim
-    content: 과제 스켈레톤(전역 변수·updatePlane 예시 블록·주석 구조)을 한 줄도 고치지 않고 삽입할 자리에 그대로 붙이기
-    status: pending
-  - id: complete assignment only
-    content: 과제에서 채우라는 부분만 수정·완성(주석 처리된 slerp, keydown의 targetPos 30.0·쿼터니언 등). 스켈레톤 골격·변수명은 유지
-    status: pending
-  - id: app glue minimal
-    content: 스켈레톤 밖에서만 최소 연결(한 프레임에 updatePlane 호출, createPlane 초기값, 충돌이 깨지면 rig/월드좌표는 스켈레톤 밖 코드에서만 조정)
+  - id: align coords
+    content: "Fix plane init + airplane.mesh vs airplaneRig: 스켈레톤 줄 유지, 월드 좌표는 getWorldPosition 헬퍼로 충돌/코인에 반영"
+    status: completed
+  - id: paste skeleton
+    content: 전역 quaternion/Vector3/state + keydown 30-step + updatePlane 블록을 과제 규격 그대로 삽입; propeller 중복 회전만 최소 조정
     status: pending
   - id: camera modes
     content: i/o/p(+과제 o/p) 목표 pose + camera position lerp + quaternion slerp; Space/orbit과 충돌 최소 분기
     status: pending
-  - id: demo mode
-    content: "정식: index 오른쪽 위 Demo mode 버튼 + game.js에서 코인·적 spawn 차단; 권장 clearCollectibles·rotate/visible 처리"
+  - id: submission path
+    content: lab1_[이름].html/js 및 빌드/rename 절차 정리 (교안 템플릿 수령 후 경로 일치)
     status: pending
-  - id: submission and polish branch
-    content: lab1_[이름].html/js 및 빌드·rename; baseline 확인 후 별도 브랜치에서 if/else 개선만
+  - id: branch polish
+    content: baseline 동작 확인 후 별도 브랜치에서 if/else 개선만
+    status: pending
+  - id: demo mode
+    content: "오른쪽 상단 버튼으로 게임 시작 후 Demo on 시 코인/적 등 충돌·점수 오브젝트 비가시+로직 생략, 바다 lava 셰이더 off"
     status: pending
 isProject: false
 ---
 
-# 과제1 코드 구현 계획 (스켈레톤 무수정 붙여넣기 → 과제 요구만 완성 + Demo mode 정식 포함)
+# 과제1 코드 구현 계획 (스켈레톤 우선 / 기존 코드 최소 변경)
 
-## 작업 순서 (고정)
+## 실행 방침 (Notion과 동기화)
 
-1. **스켈레톤 통째로 붙이기** — 과제 문서의 변수 선언·`updatePlane()` 예시( `t` / `slerpT` 분기 포함)·주석·공백까지 **의도적으로 수정하지 않고** 삽입한다.
-2. **과제가 요구하는 부분만 완성** — 예시 안의 `// update … slerpQuaternions` 등 **채워야 하는 로직**, keydown에서 `targetPos`·`startQuat`·`targetQuat` 설정 등 **명시된 요구만** 수정한다.
-3. **스켈레톤 밖 최소 연결** — 엔진이 돌아가게 `loop`에서 호출, `createPlane`에서 `airplane.mesh.position.y = 100` 등 **과제 전제와 맞는 초기값**, 필요 시 충돌/코인 거리 계산은 **스켈레톤을 건드리지 않고** 주변 코드만 조정한다.
-4. **Demo mode (정식)** — [`index.html`](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\index.html) 오른쪽 위 토글 + [`game.js`](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\src\game.js)에서 코인·적 **스폰 차단**. 비행·카메라 비교·촬영을 위해 **이 과정에 반드시 포함**한다 (아래 § Demo mode 참고).
-
-이 순서는 **수업 중 The Aviator를 각자 AI로 최신화한 뒤, 무엇이 바뀌었는지 전부 파악하기 어렵고**, **제출은 수정한 js와 html만** 요구받는 상황에서, **과제 스켈레톤을 채점·보고서 대응의 기준 블록으로 남기기 위함**이다.
+- 세부 수정 항목·순서는 **[CompGraph2026 → 4. Skeleton 맞춤 수정 체크리스트 (game.js)](https://www.notion.so/356e83691933811a9fe8d9a41c7667fd)** 와 이 문서를 동일하게 본다.
+- 코드에는 `// --- Lab1 skeleton: 전역 / keydown / updatePlane (과제 PDF·Notion) ---` 같이 **구간 주석**을 두어, Fork에서 바뀐 부분과 과제 블록을 구분한다.
 
 ## 전제와 해석
 
-- [과제 설명](https://www.notion.so/356e836919338083a83ddff4354851ef)의 `targetPos`, `startQuat` / `midQuat` / `endQuat` / `targetQuat`, `updatePlane()` 안의 `t`·`slerpT` 분기(교안의 `slerpT` 표기 포함)는 **붙여 넣은 뒤에는 골격·규격을 바꾸지 않는다.**
+- [과제 설명](https://www.notion.so/356e836919338083a83ddff4354851ef) 스켈레톤은 **`targetPos` + `startQuat` / `midQuat` / `endQuat` / `targetQuat` + `updatePlane()`** 안의 `t`·`slerpT` 분기(예시의 `slerpT` 포함) **구조와 규격을 1차 그대로** 두는 것이 목표다.
 - “더 나은 if/else”는 **동작 확인 후 별도 브랜치**에서만 다룬다.
-- **Demo mode**(코인·적 미스폰 UI)는 과제 스켈레톤과 별개이지만, **본 계획의 정식 단계**로 포함해 구현한다.
-- `airplaneRig`·충돌·기존 WASD 등 **베이스 게임 코드와의 충돌**은 **스켈레톤 텍스트가 아니라 그 밖**에서 최소한으로 처리한다.
+- “기존 코드 최대한 안 건드리기”는 **전면 리팩터 금지**. 스켈레톤이 **`airplane.mesh.position`** 을 쓰므로 [`src/game.js`](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\src\game.js) 의 **충돌/거리 계산(`airplaneRig.position`)** 은 **`getWorldPosition` 등으로 소수 줄 정합**하는 수준은 불가피하다.
 
-## 1. 계층과 좌표 (스켈레톤 vs 베이스)
+## 스켈레톤 반영 후 “어떻게 도는지” 설명 가능 여부
 
-현재 베이스: `airplaneRig`(월드 이동) + 자식 `airplane.mesh` 등.
+**가능하다.** 위 방식으로 두면 다음이 한 세트로 정리되어 보고서·면접·구술에서 말로 연결하기 쉽다.
 
-과제 스켈레톤: `airplane.mesh.position.y/z` 보간, `airplane.mesh.quaternion` slerp.
+1. **이벤트:** ASDW `keydown` 한 번 → 그 시점 `airplane.mesh.position` 기준으로 `targetPos`(+30 규칙), `startQuat` 저장, `targetQuat` 축각 설정.
+2. **매 프레임:** `updatePlane()` 가 스켈레톤대로 `targetY/Z`로 위치 보간, `t`와 분기로 `airplane.mesh.quaternion`을 slerp, 필요 시 `midQuat` 동기화·`slerpT` 증가.
+3. **Fork 접착:** 릴과 메시가 갈라져 있으면, 동기화 한 줄 또는 충돌 판정만 월드 좌표로 통일—“스켈레톤은 mesh 로컬, 게임 판정은 월드” 한 문장으로 설명.
+4. **근거:** 제출 `game.js`에서 주석 블록 + 과제 문서 절 번호(또는 스크린샷)를 짝지으면 “교수님 skeleton을 이 구간에 구현했다”가 코드상으로도 읽힌다.
 
-- 스켈레톤에 적힌 `airplane.mesh.position.y += …` 같은 줄은 **그대로 둔다.**
-- 월드 좌표가 어긋나 충돌이 깨지면 **`getWorldPosition` 보정 등은 스켈레톤 밖**에서만 논의·수정한다.
+## 1. 계층과 좌표: 스켈레톤과 맞추기
 
-## 2. 스켈레톤이 들어갈 위치 (붙여넣기 단계에서 할 일)
+현재: `airplaneRig`(월드 이동) + 자식 `airplane.mesh`(오일러로 기울기).      
 
-- **전역**: 과제에 나온 `targetPos`, `startQuat`, `midQuat`, `endQuat`, `targetQuat`, `slerpT` 등을 **문서와 동일하게** 둔다.
-- **keydown 핸들러** (또는 과제가 정한 이벤트 자리): 문서대로 `targetPos` **30.0** 스텝, `startQuat.copy(airplane.mesh.quaternion)`, `targetQuat.setFromAxisAngle(...)` — 이 부분은 **과제 요구이므로 “완성 단계”에서 채운다.** 붙여넣기 단계에서는 스켈레톤에 이미 템플릿이 있으면 그대로 두고, 없으면 교안 위치에만 추가한다.
-- **`updatePlane()`**: Notion 예시 블록을 **가능한 한 동일하게** [`src/game.js`](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\src\game.js)에 둔다.
-  - Three.js API: `slerpQuaternions` / `.slerp` 등은 **완성 단계**에서 과제가 요구하는 호출만 채운다.
-  - `airplane.propeller.rotation.x += 0.2`는 스켈레톤에 있다면 **원문 유지**를 우선하고, `loop`와 중복되면 **스켈레톤이 아닌 쪽**(예: `loop`)만 최소 조정한다.
+스켈레톤: `airplane.mesh.position.y/z` 보간, `airplane.mesh.quaternion` slerp.
 
-## 3. 기존 WASD 처리와의 관계 (베이스 코드, 스켈레톤 밖)
+**권장 정렬 (구현 시 선택지를 하나로 고정):**
 
-- 베이스의 **hold-to-move**와 과제 **keydown·target** 방식이 겹치면, **스켈레톤 if 분기를 바꾸지 않도록** 하고, 가능하면 **베이스 측 입력 처리**만 꺼거나 분기해 같은 프레임에 두 세계가 섞이지 않게 한다.
+- 초기에 **월드 높이 100**을 스켈레톤대로 맞추려면 예: **`airplaneRig.position`을 (0,0,0)에 두고 `airplane.mesh.position`을 (0,100,0)** 으로 두거나, 반대로 **릴 y=100·메시 y=0** (지금과 동일)인 채 스켈레톤의 `airplane.mesh.position`만 **오프셋**으로 쓰는 방식 중 하나를 택한다.
+- 1차 목표는 “스켈레톤 줄을 그대로 읽을 수 있게” 하는 것이므로, **과제 예시에 나온 `airplane.mesh.position.y += …` / `targetY` 줄은 파일에 그대로 두고**, 필요 시 그 직전/직후에 **릴과의 동기화 한 줄**만 주석으로 “프로젝트 호환”이라고 표시한다.
+- **충돌/코인/적**: [`airplaneRig.position`을 쓰는 부분](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\src\game.js) (대략 L745, L885 근처)을 **`airplane.mesh.getWorldPosition(...)`** (또는 동일 결과의 헬퍼)로 바꿔, 메시/릴 분리 후에도 거리 판정이 유지되게 한다.
+
+## 2. 스켈레톤 “복제” 삽입 위치
+
+- **전역**: `targetPos`(Vector3), `startQuat`, `midQuat`, `endQuat`, `targetQuat`, `slerpT` 및 과제에서 요구하는 초기값 준비.
+- **keydown**: 과제대로 **당시 기준**으로 `targetPos`를 **30.0** 스텝 규칙에 맞게 설정; `startQuat.copy(airplane.mesh.quaternion)`; 입력 방향에 맞게 `targetQuat.setFromAxisAngle(...)`.
+- **`updatePlane()`**: Notion에 있는 예시 블록을 **주석/공백 포함 가능한 한 동일하게** 유지한 채 [`updatePlane`](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\src\game.js) 내부에 통합.
+  - Three.js r152+ API: `THREE.Quaternion.slerpQuaternions( qa, qb, t, dest )` 또는 `dest.copy(qa).slerp(qb, t)` — **스켈레톤 함수명 `slerpQuaternions`가 쓰이면** 그 시그니처에 맞춰 호출 (문서 확인 후 고정).
+  - **`airplane.propeller.rotation.x += 0.2`** 는 현재 루프(`loop`)에도 propeller 회전이 있으므로, **중복만큼만 조정**해 시각적으로 두 배로 돌지 않게 하는 최소 수정.
+
+## 3. 기존 WASD 처리와의 관계 (최소 충돌)
+
+- 지금은 **hold-to-move** (`keysDown` + 매 프레임 이동) 입니다. 과제는 **keydown 한 번에 target 갱신** 쪽입니다.
+- 스켈레톤 우선이라면: **과제용 로직을 우선 적용**하고, 기존 `if (keysDown.has ...)` 기반의 즉시 이동/오일러 기울기는 **같은 프레임에 실행되지 않게** `updatePlane()` 안에서 분기로 막는 편이 안전합니다 (변경 범위: `updatePlane` 한 함수 내부 위주).
 
 ## 4. 카메라 (계획 문서 [3. 카메라…](https://www.notion.so/3-356e83691933813285a0daf30dd04555) 반영)
 
-- **키**: 사용자 계획 i = side(기본), o = FPS, p = top + 과제 명시 O/P — 채점용으로 최소 O·P는 반드시 동작 (예: `KeyO` / `KeyP`, `KeyI`는 side).
-- **부드러운 전환**: 모드마다 목표 월드 position + 목표 quaternion — `camera.position`은 잔차 비율 lerp, `camera.quaternion`은 slerp.
-- 기존 Space 순환·`enterFirstPerson` / `applyThirdPersonCamera` / `OrbitControls` 는 당장 끊지 말고, `handleKeyDown`에서만 최소 분기 (과제 모드와 Space 충돌 시 한 가지 방식만 택).
+- **키**: 사용자 계획 **i = side(기본), o = FPS, p = top** + 과제 명시 **O/P**와의 정합: 과제 채점용으로 **최소 O·P는 반드시 동작**하게 매핑 (예: `KeyO`/`KeyP`는 유지, `KeyI`는 side 추가).
+- **부드러운 전환**: 모드마다 저장해 둔 **목표 월드 position + 목표 quaternion** 으로,
+  - `camera.position` 은 잔차 비율 lerp (과제 비행기 위치 보간과 동일한 “논리”),
+  - `camera.quaternion` 은 slerp.
+- 기존 **Space 순환**(third/first/orbit), `enterFirstPerson` / `applyThirdPersonCamera` / `OrbitControls` 는 **당장 끊지 말고**, 과제 모드가 켜진 뒤에는 “고정 카메라 모드”와 충돌 나지 않게 **`handleKeyDown`에서만** 최소 분기 (예: 과제용 모드일 때 Space 무시 또는 별도 설계 — 구현 단계에서 한 가지만 택).
 
 ## 5. 제출 규칙 (저장소에 템플릿 없음)
 
-현재 [`index.html`](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\index.html) 은 `/src/main.js` 모듈 진입. 교안 template html은 레포에 없으므로:
+현재 [`index.html`](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\index.html) 은 `/src/main.js` 모듈 진입이다. 교안 **template html**은 레포에 없으므로:
 
-- 강의 HTML에 맞춰 `lab1_[이름].html` 과 `lab1_[이름].js` 로드 경로를 맞춘다.
-- Vite: 별도 엔트리 + `vite build` 후 번들을 `lab1_[이름].js` 로 두거나, 교수 요구에 맞는 단일 파일 구조로 정리.
+- 강의에서 받은 HTML 골격에 맞춰 **`lab1_[이름].html`** 을 두고 `script` 가 **`lab1_[이름].js`** 를 로드하게 맞춘다.
+- Vite 사용 시: **별도 엔트리**(예: `src/lab1-entry.js` → `import './game.js'` 또는 최종 묶음) + `vite build` 로 단일 번들을 **`lab1_[이름].js`** 로 rename 해 제출, 또는 교수가 요구하는 **비번들 단일 파일** 구조면 그에 맞춰 한 번 더 정리한다.
 
 zip 명 `[학번][이름]_과제1.zip` 은 사용자 측 패키징.
 
-## Demo mode (정식 과정 — 비행·카메라 비교용)
-
-코인(점수)·적(장애물)이 거리마다 계속 스폰되면 과제 동작을 화면으로 비교하기 어렵다. [수정 `game.js` + `index.html`만 쓰는 제출 형태](https://github.com/insung52/computer_graphics_2026/tree/main/%EC%98%88%EB%B9%84/1_threejsupdate)에서도 마찬가지이므로, **Demo mode는 선택이 아니라 본 구현 계획의 필수 단계**다. 과제 스켈레톤 블록은 건드리지 않고, **스켈레톤 밖**에서만 다음을 구현한다.
-
-### 무엇을 건드리나 (필수)
-
-| 파일 | 할 일 |
-|------|--------|
-| [`index.html`](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\index.html) | 오른쪽 위에 고정 버튼(또는 라벨+토글) 추가. 예: `<button type="button" id="demoModeToggle">Demo mode</button>`. 위치는 `position: fixed; top: …; right: …; z-index` 를 `<style>` 한 덩어리 또는 기존 [`css/game.css`](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\css\game.css)에 클래스 추가. **제출을 html·js만 한다면** 스타일은 HTML 안에 두어도 됨. |
-| [`src/game.js`](c:\Users\AIproject2025\source\2026CompGraf\TheAviator\src\game.js) | (1) 플래그 `let demoMode = false` (또는 `game` 객체 프로퍼티). (2) `init()` 끝에서 `#demoModeToggle` 클릭 시 `demoMode = !demoMode` 및 버튼 문구·클래스 갱신. (3) **`loop()` 안 `game.status === 'playing'` 블록**에서 `coinsHolder.spawnCoins()` 호출 직전 조건에 `&& !demoMode` (동전 스폰 구간은 대략 `distance`·`coinLastSpawn` 체크 부분, 현재 L964–970 근처). (4) 같은 방식으로 `ennemiesHolder.spawnEnnemies()` 구간(L980–986 근처)에 `&& !demoMode`. |
-
-### 최소 변경의 의미
-
-- **스폰만 막으면** 이미 필드에 나와 있는 코인·적은 그대로 움직이며 충돌할 수 있다. **처음부터 Demo mode 켜고** 비교하면 깨끗하다.
-- 한 단계 더 가려면: `demoMode`일 때 `coinsHolder.rotateCoins()` / `ennemiesHolder.rotateEnnemies()` 호출을 건너뛰거나, `coinsHolder.mesh.visible` / `ennemiesHolder.mesh.visible` 을 `false`로 두어 화면·충돌을 같이 끈다(이때는 L1026–1027 근처도 조건부).
-
-### 보조 동작 (권장, 스켈레톤 밖)
-
-- 플레이 중 Demo mode를 켜면 **이미 스폰된** 코인·적이 남을 수 있으므로, 토글 시 홀더에서 메시를 빼 풀에 돌려보내는 **`clearCollectiblesForDemo()`** 헬퍼를 두면 촬영·비교가 깨끗하다.
-- `init()`에서 `getElementById('demoModeToggle')`이 **null**이면 리스너를 달지 않게 하면, HTML만 달라진 빌드도 안전하다.
-- **`createCoins()` / `createEnnemies()`** 는 풀·홀더만 만들 뿐 즉시 필드에 깔지 않으므로, “안 나오게”의 핵심은 **`spawnCoins` / `spawnEnnemies`를 호출하지 않는 것**이다.
-- Demo여도 **`updateDistance`·`updateEnergy`·레벨**은 기본적으로 돌아간다. 에너지까지 멈추려면 **별도 플래그**로 `updateEnergy` 등만 스켈레톤 밖에서 가드.
-
-### 과제 제출과의 관계
-
-- 교수님 지시가 **UI 추가 금지**가 아니면, Demo 버튼·로직은 **제출물에 포함하는 것이 이 계획의 기본**이다. **금지**이면 교안에 맞춰 zip 전에 제거하거나 대체 수단을 둔다.
-
-### 에이전트 규칙
-
-- **Demo mode는 정식 단계까지 코드에 반영한다.** (과제 스켈레톤 본문은 여전히 임의로 바꾸지 않는다.)
-
 ## 6. Git 브랜치
 
-- `assignment1-baseline` (또는 동일 목적): 스켈레톤 보존 + 동작 + 카메라 전환 + **Demo mode**.
-- `assignment1-polish` (나중): if/else 및 전환·은행각 개선만.
+- **`assignment1-baseline`** (또는 동일 목적): 스켈레톤 그대로 + 동작 + 카메라 기본 전환.
+- **`assignment1-polish`** (나중): if/else 및 전환·은행각 개선만.
 
 ## 7. 완료 기준 (0점 방지 체크)
 
@@ -119,8 +98,15 @@ zip 명 `[학번][이름]_과제1.zip` 은 사용자 측 패키징.
 - ASDW: **keydown 기반 targetPos** + 화면에서 목표로 스무스 이동.
 - 쿼터니언: **slerp가 실제로 호출**되고 기울기가 순간 점프만 하지 않음.
 - **O/P** 카메라 전환 + (계획대로) **I side** + 전환 시 끊김 없음.
-- **Demo mode:** 화면 **오른쪽 위**에서 토글 가능, 켠 뒤 **새 코인·적이 스폰되지 않음** (권장: 기존해도 정리).
 - 리포트/zip/js 이름은 사용자 제출 단계 (코드와 별개).
+
+## 8. Demo 모드 (과제 채점과 별도 — 시연·촬영·플레이 테스트용)
+
+- **UI:** 화면 **오른쪽 위**에 컨트롤(토글 또는 “Demo” 버튼 등). **게임을 시작한 뒤** Demo를 켤 수 있게 하거나, 버튼이 곧 시작 트리거라면 “시작 → Demo on” 순서를 명확히 함.
+- **Demo on일 때:**
+  - **점수/충돌 관련 오브젝트**가 보이지 않게 처리: 코인·적 메시 숨김(`visible=false`) 또는 홀더 제거, 스폰/충돌 검사·에너지 감소 등 **관련 게임 로직은 실행하지 않음**(숨겨만 두고 충돌이 나면 안 됨).
+  - **바다:** 적용 중인 **lava 셰이더(용암 룩) 끔** — 예: Sea를 기본 `MeshPhong` 등 백업 재질로 바꾸거나, `createSeaLavaShaderMaterial` 경로를 우회하는 플래그.
+- **과제 제출물과의 관계:** 교수님이 “수정한 js/html만” 요구할 때 **Demo 모드 코드도 같이 포함**해도 되는지는 수업 확인 권장. 기본은 **제출 빌드에서 Demo UI를 숨기거나** `demoMode=false` 고정으로 둘 수 있음.
 
 ## 추후 추가구현 (사용자가 직접 말하기 전에는 하지 않음)
 
