@@ -146,6 +146,8 @@ const startQuat = new THREE.Quaternion();
 const midQuat = new THREE.Quaternion();
 const endQuat = new THREE.Quaternion();
 const targetQuat = new THREE.Quaternion();
+/** 비행 메시 기준 평형 자세 (항상 identity). mutate 금지. */
+const LAB1_LEVEL_QUAT = new THREE.Quaternion();
 let slerpT = 0;
 
 /**
@@ -157,8 +159,9 @@ const SEA_MERGE_VERTICES_TOLERANCE = 1e-4;
 /**
  * 바다 **메시 전체**가 도는 속도만 `game.speed` 대비 줄이기 (0~1). 1이면 구버전과 동일 비율.
  * 정점 파도·용암 셰이더와는 별개. `talktocursor/SEA_WAVES_AND_ROTATION.md`, `talktocursor/SEA_LAVA_SHADER.md` 참고.
+ * 1에 가까울수록 코인·적과 같은 `game.speed` 체감; 너무 낮으면 세계만 느리게 보임.
  */
-const SEA_MESH_ROTATION_SCALE = 0.25;
+const SEA_MESH_ROTATION_SCALE = 1;
 
 /** Lava Bloom (global postprocess). Tune if too strong. */
 const LAVA_BLOOM = {
@@ -331,7 +334,6 @@ function lab1OnPlaneKeyDown(code) {
   if (code === 'KeyA') dz -= step;
   targetPos.set(p.x, p.y + dy, p.z + dz);
 
-  startQuat.copy(airplane.mesh.quaternion);
   slerpT = 0;
 
   const qPitch = new THREE.Quaternion();
@@ -342,7 +344,9 @@ function lab1OnPlaneKeyDown(code) {
   if (dz !== 0) {
     qRoll.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(dz) * KEYBOARD_PLANE_ROLL_TILT);
   }
-  targetQuat.copy(startQuat).multiply(qPitch).multiply(qRoll);
+  // 레벨 기준 절대 은행 — 현재 자세에 곱하지 않음(연타 시 pitch/roll 누적·과회전 방지).
+  targetQuat.identity();
+  targetQuat.multiply(qPitch).multiply(qRoll);
 }
 
 function handleMouseUp() {
@@ -771,6 +775,7 @@ EnnemiesHolder.prototype.spawnEnnemies = function () {
 };
 
 EnnemiesHolder.prototype.rotateEnnemies = function () {
+  getPlaneWorldPosition(_planeWorldPositionScratch);
   for (let i = 0; i < this.ennemiesInUse.length; i++) {
     const ennemy = this.ennemiesInUse[i];
     ennemy.angle += game.speed * deltaTime * game.ennemiesSpeed;
@@ -782,7 +787,6 @@ EnnemiesHolder.prototype.rotateEnnemies = function () {
     ennemy.mesh.rotation.z += Math.random() * 0.1;
     ennemy.mesh.rotation.y += Math.random() * 0.1;
 
-    getPlaneWorldPosition(_planeWorldPositionScratch);
     _planeCollisionDiffScratch.subVectors(_planeWorldPositionScratch, ennemy.mesh.position);
     const d = _planeCollisionDiffScratch.length();
     if (d < game.ennemyDistanceTolerance) {
@@ -913,6 +917,7 @@ CoinsHolder.prototype.spawnCoins = function () {
 };
 
 CoinsHolder.prototype.rotateCoins = function () {
+  getPlaneWorldPosition(_planeWorldPositionScratch);
   for (let i = 0; i < this.coinsInUse.length; i++) {
     const coin = this.coinsInUse[i];
     if (coin.exploding) continue;
@@ -923,7 +928,6 @@ CoinsHolder.prototype.rotateCoins = function () {
     coin.mesh.rotation.z += Math.random() * 0.1;
     coin.mesh.rotation.y += Math.random() * 0.1;
 
-    getPlaneWorldPosition(_planeWorldPositionScratch);
     _planeCollisionDiffScratch.subVectors(_planeWorldPositionScratch, coin.mesh.position);
     const d = _planeCollisionDiffScratch.length();
     if (d < game.coinDistanceTolerance) {
@@ -1029,10 +1033,15 @@ function createParticles() {
   scene.add(particlesHolder.mesh);
 }
 
+/** RAF 간격이 벌어질 때(탭 복귀·드래그 등) 한 프레임에 몰아치지 않게 상한. */
+const MAX_DELTA_TIME_MS = 64;
+
 function loop() {
   newTime = new Date().getTime();
   deltaTime = newTime - oldTime;
   oldTime = newTime;
+  if (deltaTime <= 0) deltaTime = 16;
+  else if (deltaTime > MAX_DELTA_TIME_MS) deltaTime = MAX_DELTA_TIME_MS;
 
   if (game.status == 'playing') {
     if (
@@ -1074,7 +1083,9 @@ function loop() {
     updateDistance();
     updateEnergy();
     game.baseSpeed += (game.targetBaseSpeed - game.baseSpeed) * deltaTime * 0.02;
-    game.speed = game.baseSpeed * game.planeSpeed;
+    // Lab1: targetPos 이동 중에도 nearTarget이 자주 true가 되어 planeMinSpeed가 먹히면
+    // game.speed까지 떨어져 세계 전체가 체감상 크게 느려진다. 진행 속도는 max 기준 유지.
+    game.speed = game.baseSpeed * game.planeMaxSpeed;
   } else if (game.status == 'gameover') {
     game.speed *= 0.99;
     airplane.mesh.rotation.z += (-Math.PI / 2 - airplane.mesh.rotation.z) * 0.0002 * deltaTime;
@@ -1171,17 +1182,15 @@ function updatePlane() {
     // target position 에 위치했을 때, 비행기가 평형상태에 오도록
     let tY = Math.abs(airplane.mesh.position.y - targetY);
     let tZ = Math.abs(airplane.mesh.position.z - targetZ);
-    let t = 1.0 - Math.max(tY, tZ) / 30.0;
 
-    endQuat.identity();
-
-    if (t <= 0.5) {
-      airplane.mesh.quaternion.copy(startQuat).slerp(targetQuat, Math.min(1, t * 2));
-      midQuat.copy(airplane.mesh.quaternion);
-    } else if (slerpT <= 1.0) {
-      airplane.mesh.quaternion.copy(midQuat).slerp(endQuat, Math.min(1, slerpT));
-      slerpT += 0.02;
-    }
+    // posErr 클수록 targetQuat(이번 입력 은행)에 가깝고, 목표에 가까워질수록 LAB1_LEVEL_QUAT(평형)에 가까운 목표 자세.
+    // 2단계(midQuat→identity) 분리 제거: t>0.5에서 1단계 스킵·midQuat 정체되는 문제와 연타 누적을 같이 해소.
+    const posErr = Math.max(tY, tZ);
+    const bankWeight = Math.min(1, posErr / (LAB1_TARGET_STEP * 0.32));
+    midQuat.slerpQuaternions(LAB1_LEVEL_QUAT, targetQuat, bankWeight);
+    const orientAlpha = Math.min(1, (10 * deltaTime) / 1000);
+    airplane.mesh.quaternion.slerp(midQuat, orientAlpha);
+    airplane.mesh.quaternion.normalize();
 
     airplane.propeller.rotation.x += 0.2;
 
