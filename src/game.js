@@ -151,8 +151,6 @@ const midQuat = new THREE.Quaternion();
 /** 과제 가이드: 수평(레벨) 쪽 끝 orientation — 리셋 시 identity만 두고, 매 프레임 multiply 등으로 mutate 하지 않음. */
 const endQuat = new THREE.Quaternion();
 const targetQuat = new THREE.Quaternion();
-/** `updatePlane`(B)에서 endQuat↔midQuat SLERP 결과를 넣는 버퍼(연속 SLERP 파이프라인용). */
-const _lab1OrientPipeScratch = new THREE.Quaternion();
 let slerpT = 0;
 
 /**
@@ -1241,21 +1239,34 @@ function updatePlane() {
     // 단위 quaternion은 4차원 구 S³ 위의 점으로 볼 수 있고, SLERP는 그 구 위의 **대원호(최단 경로)** 를 따라 q0에서 q1로 t만큼 진행한 orientation을 준다(과도한 꼬임을 피하려면 보통 짧은 쪽 호를 고름).
     // Three.js에서는 `Quaternion.slerpQuaternions(q0, q1, t)`가 그 결과를, `q.slerp(q1, α)`는 현재 q에서 q1로 α만큼 SLERP한 결과를 넣는다.
     //
-    // 과제 가이드 네 quaternion 모두 사용: startQuat(keydown 시 mesh), targetQuat(입력 목표), endQuat(수평=identity), midQuat(중간 결과).
-    // (1) startQuat ↔ targetQuat 를 orientBlendT로 SLERP → midQuat (이동이 많을수록 targetQuat 쪽).
-    // (2) endQuat ↔ midQuat 을 같은 orientBlendT로 SLERP → _lab1OrientPipeScratch (목표 위치에 가까울수록 endQuat=수평 쪽).
-    // (3) mesh.quaternion 을 (2) 결과 쪽으로 orientAlpha만큼 SLERP.
-    // orientBlendT는 위치 오차(남은 Y/Z 이동량)로부터 계산한다.
-    let tY = Math.abs(airplane.mesh.position.y - targetY);
-    let tZ = Math.abs(airplane.mesh.position.z - targetZ);
+    // 과제 요구사항: SLERP는 한 번만 사용하고, t 구간은 if/else로 분기.
+    // 아이디어: 이동 구간에서는 startQuat→targetQuat로 기울이고, 목표 근처에서는 targetQuat→endQuat로 수평 복귀.
+    // 두 구간의 t를 각각 0~1로 정규화하면, 한 번의 slerpQuaternions 호출만으로도 부드러운 orientation 곡선을 만들 수 있다.
+    const tY = Math.abs(airplane.mesh.position.y - targetY);
+    const tZ = Math.abs(airplane.mesh.position.z - targetZ);
+    const orientMotionErr = Math.max(tY, tZ);
 
-    const orientMotionErr = Math.max(tY, tZ); // orientBlendT를 정하기 위한 스칼라(남은 Y/Z 이동량의 대표값)
-    const orientBlendT = Math.min(1, orientMotionErr / (LAB1_TARGET_STEP * 0.32)); // [0,1] — 아래 (1)(2) SLERP에 동일 t로 사용
-    midQuat.slerpQuaternions(startQuat, targetQuat, orientBlendT); // SLERP: startQuat → targetQuat, t = orientBlendT
-    _lab1OrientPipeScratch.slerpQuaternions(endQuat, midQuat, orientBlendT); // SLERP: endQuat(수평) → midQuat, t = orientBlendT
-    const orientAlpha = Math.min(1, (10 * deltaTime) / 1000); // 세 번째 SLERP의 α(프레임당 회전량 상한)
-    airplane.mesh.quaternion.slerp(_lab1OrientPipeScratch, orientAlpha); // SLERP: 현재 mesh.quaternion → 파이프라인 결과
-    airplane.mesh.quaternion.normalize(); // 누적 오차로 단위(quaternion length=1)가 흐트러지는 것 방지
+    let qFrom = startQuat;
+    let qTo = targetQuat;
+    let orientT = 1;
+
+    // far: start -> target, near: target -> level(end)
+    if (orientMotionErr > LAB1_TARGET_STEP * 0.5) {
+      const farStart = LAB1_TARGET_STEP * 2.0;
+      const farEnd = LAB1_TARGET_STEP * 0.5;
+      orientT = THREE.MathUtils.clamp((farStart - orientMotionErr) / (farStart - farEnd), 0, 1);
+      qFrom = startQuat;
+      qTo = targetQuat;
+    } else {
+      const nearStart = LAB1_TARGET_STEP * 0.5;
+      const nearEnd = 0;
+      orientT = THREE.MathUtils.clamp((nearStart - orientMotionErr) / (nearStart - nearEnd), 0, 1);
+      qFrom = targetQuat;
+      qTo = endQuat;
+    }
+
+    airplane.mesh.quaternion.slerpQuaternions(qFrom, qTo, orientT);
+    airplane.mesh.quaternion.normalize();
 
     // --- (C) Propeller: '항상 돌아가는' 기본 회전(프레임당 고정 증가) ---
     // 원리: 매 프레임 일정 각도를 더해 시각적으로 기본 RPM을 만들고,
