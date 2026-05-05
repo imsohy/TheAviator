@@ -158,7 +158,7 @@ let mousePos = { x: 0, y: 0 };
 
 /**
  * Lab1 (WASD):
- * - keydown에서는 "목표값"만 세팅한다. (targetPos / startQuat / targetQuat / currentMoveDistance)
+ * - keydown에서는 "목표값"만 세팅한다. (targetPos / startQuat / targetQuat)
  * - 실제 이동/회전 보간은 매 프레임 `updatePlane()`에서 수행한다.
  */
 const KEYBOARD_PLANE_Z_LIMIT = 120;
@@ -174,11 +174,12 @@ const startQuat = new THREE.Quaternion();
 // 과제 예시의 "중간 자세": updatePlane()의 1단계 slerp에서 저장/참조됨
 // (주의) keydown에서는 임시 피치 쿼터니언 버퍼로도 재사용한다. updatePlane에서 곧 덮어쓴다.
 const midQuat = new THREE.Quaternion();
-let currentMoveDistance = LAB1_TARGET_STEP;
 /** 과제 가이드: 수평(레벨) 쪽 끝 orientation — 리셋 시 identity만 두고, 매 프레임 multiply 등으로 mutate 하지 않음. */
 const endQuat = new THREE.Quaternion();
 // keydown 방향에 따른 목표 기울기(회전 보간의 첫 번째 목표점)
 const targetQuat = new THREE.Quaternion();
+// 과제 예시의 2단계 복귀 진행률(0~1): updatePlane에서 조금씩 증가
+let slerpT = 0;
 
 /**
  * `mergeVertices` tolerance for sea cylinder.
@@ -438,16 +439,17 @@ function lab1ClampTargetPosToPlayBounds() {
  * Lab1: keydown에서 "한 번의 입력"에 대한 목표값을 세팅한다.
  *
  * 세팅하는 값:
- * - targetPos           : 이번 입력의 목표 위치(클램프 적용)
+ * - targetPos  : 이번 입력의 목표 위치
  * - startQuat           : 입력 순간의 현재 자세(회전 보간 시작)
  * - targetQuat          : 입력 방향에 따른 목표 기울기(피치/롤)
- * - currentMoveDistance : 진행률 정규화를 위한 이번 입력의 실제 이동 스케일(클램프 반영)
  */
 function lab1OnPlaneKeyDown(code) {
   if (!airplane?.mesh || game.status !== 'playing') return;
 
   // (1) Rotation setup: keydown 순간의 자세를 "회전 보간 시작점"으로 고정
   startQuat.copy(airplane.mesh.quaternion);
+  // 과제 예시: 2단계 복귀 진행률은 keydown마다 0으로 리셋
+  slerpT = 0;
 
   // (2) Translation setup: WASD → (dy, dz) 한 스텝 목표점 생성 후, 플레이 범위로 clamp
   const p = airplane.mesh.position;
@@ -459,20 +461,20 @@ function lab1OnPlaneKeyDown(code) {
   if (code === 'KeyD') dz += step;
   if (code === 'KeyA') dz -= step;
   targetPos.set(p.x, p.y + dy, p.z + dz);
-  lab1ClampTargetPosToPlayBounds();
 
-  // (3) Post-clamp values:
-  // - actualDy/Dz: 경계 clamp를 반영한 "실제 이동량" (경계에서 막히면 0이 될 수 있음)
-  // - currentMoveDistance: updatePlane()에서 remaining을 0~1 진행률로 정규화할 분모
-  const actualDy = targetPos.y - p.y;
-  const actualDz = targetPos.z - p.z;
-  currentMoveDistance = Math.max(Math.abs(actualDy), Math.abs(actualDz), 1);
-
-  // (4) Target orientation: "피치 × 롤" 합성으로 목표 기울기 쿼터니언을 만든다.
-  // - actualDy/Dz가 0이면 sign이 0 → 각도 0 → 항등 쿼터니언이 되어 자연스럽게 해당 축 회전이 사라진다.
-  midQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(actualDy) * KEYBOARD_PLANE_PITCH_TILT); // pitch
-  targetQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(actualDz) * KEYBOARD_PLANE_ROLL_TILT); // roll
-  targetQuat.premultiply(midQuat); // targetQuat = pitch * roll
+  // (3) Rotation target: 입력 방향에 맞는 목표 기울기(targetQuat) 설정
+  // - 과제 가이드: targetQuat은 setFromAxisAngle로 설정(한 축만이면 직접, 대각은 두 축을 만든 뒤 곱)
+  if (dy !== 0 && dz === 0) {
+    targetQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(dy) * KEYBOARD_PLANE_PITCH_TILT);
+  } else if (dz !== 0 && dy === 0) {
+    targetQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(dz) * KEYBOARD_PLANE_ROLL_TILT);
+  } else if (dy !== 0 && dz !== 0) {
+    midQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(dy) * KEYBOARD_PLANE_PITCH_TILT); // pitch
+    targetQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(dz) * KEYBOARD_PLANE_ROLL_TILT); // roll
+    targetQuat.premultiply(midQuat); // targetQuat = pitch * roll
+  } else {
+    targetQuat.identity();
+  }
 }
 
 function handleMouseUp() {
@@ -1310,12 +1312,10 @@ function updatePlane() {
   //   u가 0에서 시작할 때/1에 도착할 때 갑자기 꺾이지 않게(급변 감소) 만듭니다.
 
   // 알고리즘 설명
-  // 0) Lab1: `targetPos`를 mesh가 도달 가능한 Y/Z 범위로 제한 — 밖에 두면 위치 오차·orientation 블렌드가 왜곡될 수 있음.
   // 1) "목표(targetPos)까지 얼마나 남았나"를 숫자(posErr)로 만든다.
   // 2) 그 숫자를 0~1 범위(u)로 바꾼다. (0=도착, 1=이동 중)
   // 3) u로 planeSpeed를 min~max 사이에서 LERP한다.
   // 결과: 목표에 가까울수록 planeSpeed↓(min), 멀수록 planeSpeed↑(max) → game.speed(전체 진행/회전)도 같은 방향으로 변함.
-  lab1ClampTargetPosToPlayBounds();
   const dy = Math.abs(airplane.mesh.position.y - targetPos.y); // Y 방향: 목표까지 남은 거리
   const dz = Math.abs(airplane.mesh.position.z - targetPos.z); // Z 방향: 목표까지 남은 거리
   const posErr = Math.max(dy, dz); // 대표 오차(둘 중 하나라도 멀면 아직 이동 중이므로 큰 값 채택)
@@ -1356,53 +1356,29 @@ function updatePlane() {
     // - 여기서 t는 반드시 0~1 범위로 해석된다.
     //   t = 0이면 q0, t = 1이면 q1, 그 사이는 두 자세 사이의 부드러운 중간 자세이다.
     //
-    // 전체 이동 진행률 (과제 가이드의 `... / 30.0`을 일반화한 형태):
-    // - 과제 예시: t = 1 - remaining / 30.0  (keydown 한 번의 목표 스텝을 30으로 가정)
-    // - 우리 코드: t = 1 - remaining / currentMoveDistance
-    //   - currentMoveDistance는 keydown에서 세팅된다. (lab1OnPlaneKeyDown)
-    //   - 보통은 LAB1_TARGET_STEP(=30)과 같고, 경계 clamp로 목표점이 잘리면 30보다 작아질 수 있다.
-    // - remaining은 "현재 위치 → targetPos"의 남은 거리(여기서는 max(|dy|,|dz|) 방식)이다.
-    // - 따라서 keydown 직후에는 t가 0에 가깝고, 목표 위치에 도착할수록 t가 1에 가까워진다.
+    // 전체 이동 진행률 (과제 가이드 그대로):
+    // - t = 1 - max(tY, tZ) / 30.0
+    // - 여기서 30.0은 keydown에서 만드는 목표 스텝(LAB1_TARGET_STEP)
     const tY = Math.abs(airplane.mesh.position.y - targetY);
     const tZ = Math.abs(airplane.mesh.position.z - targetZ);
-    const remaining = Math.max(tY, tZ);
+    const t = 1 - Math.max(tY, tZ) / LAB1_TARGET_STEP;
 
-    const t = THREE.MathUtils.clamp(1 - remaining / currentMoveDistance, 0, 1);
-
-    // smoothstep 형태의 easing.
-    // 그냥 t를 써도 되지만, smoothT를 쓰면 회전 시작과 끝이 덜 딱딱하게 보인다.
-    const smoothT = t * t * (3 - 2 * t);
-
-    // 전체 이동 구간을 두 단계로 나눈다.
-    // 1단계: smoothT = 0.0 ~ 0.5
-    //   startQuat -> targetQuat
-    //   즉, keydown 당시 자세에서 입력 방향으로 기체를 기울이는 구간.
-    //
-    // 2단계: smoothT = 0.5 ~ 1.0
-    //   targetQuat -> endQuat
-    //   즉, 기울어진 자세에서 다시 수평 자세로 복귀하는 구간.
-    //
-    // 중요한 점:
-    // - slerpQuaternions(q0, q1, t)의 t는 0~1이어야 한다.
-    // - 그런데 1단계에서 smoothT는 0~0.5까지만 변한다.
-    // - 따라서 smoothT / 0.5 를 해서 0~0.5 구간을 0~1 구간으로 다시 매핑한다.
-    // - 2단계도 마찬가지로 (smoothT - 0.5) / 0.5 를 해서 0.5~1.0 구간을 0~1 구간으로 다시 매핑한다.
-    if (smoothT <= 0.5) {
-      // 전체 진행률 0.0~0.5를 첫 번째 SLERP용 진행률 0.0~1.0으로 변환
-      const localT = smoothT / 0.5;
-
-      // 1단계: keydown 당시 자세(startQuat)에서 입력 방향 목표 자세(targetQuat)로 기울인다.
-      airplane.mesh.quaternion.slerpQuaternions(startQuat, targetQuat, localT);
-
-      // 과제 요구사항의 midQuat.
-      // startQuat -> targetQuat 보간 과정에서 현재 중간 자세를 저장한다.
+    if (t <= 0.5) {
+      // update airplane.mesh.quaternion by using slerpQuaternions with t (or any step you want)
+      // 과제 요구사항: midQuat = airplane.mesh.quaternion
+      // update airplane.mesh.quaternion by using slerpQuaternions with t (or any step you want)
+      // and then set midQuat to airplane.mesh.quaternion, i.e, midQuat.copy(airplane.mesh.quaternion);
+      const localSlerpT = t / 0.5; // t: 0~0.5 → slerpT: 0~1
+      airplane.mesh.quaternion.slerpQuaternions(startQuat, targetQuat, localSlerpT);
       midQuat.copy(airplane.mesh.quaternion);
-    } else {
-      // 전체 진행률 0.5~1.0을 두 번째 SLERP용 진행률 0.0~1.0으로 변환
-      const localT = (smoothT - 0.5) / 0.5;
-
-      // 2단계: 목표 기울기(targetQuat)에서 수평 자세(endQuat)로 복귀한다.
-      airplane.mesh.quaternion.slerpQuaternions(targetQuat, endQuat, localT);
+      slerpT = 0;
+    } else if (slerpT <= 1.0) {
+      // 2단계: 목표 기울기(targetQuat)에서 수평 자세(endQuat)로 복귀 (가이드 예시의 slerpT 사용)
+      // update airplane.mesh.quaternion by using slerpQuaternions with slerpT (or any step you want)
+      // increase slerpT by small value
+      airplane.mesh.quaternion.slerpQuaternions(targetQuat, endQuat, slerpT);
+      slerpT += 0.05;
+      slerpT = Math.min(1, slerpT);
     }
 
     // 수치 오차 누적 방지.
