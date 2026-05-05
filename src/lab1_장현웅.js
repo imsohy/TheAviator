@@ -1505,3 +1505,5 @@ function init() {
 }
 
 export { init };
+
+window.addEventListener('load', init, false);
