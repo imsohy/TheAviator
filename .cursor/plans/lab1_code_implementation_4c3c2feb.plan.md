@@ -1,19 +1,22 @@
 ---
 name: Lab1 code implementation
-overview: Notion「4. Skeleton 맞춤 수정 체크리스트」와 동일한 방식으로 game.js를 고친다—전역 상태·createPlane 초기 y/z·keydown(30 step)·updatePlane skeleton 본문·getWorldPosition로 충돌 정합·propeller 중복 제거·카메라 O/P(+I) 보간. 같은 파일에 주석 블록으로 스켈레톤 구간을 고정해 보고서·구술에서 데이터 흐름을 설명 가능하게 한다. Demo 모드·제출 경로·polish 브랜치는 기존 ToDo 유지.
+overview: Notion「4. Skeleton 맞춤 수정 체크리스트」와 동일한 방식으로 game.js를 고친다—전역·keydown·updatePlane(translation+rotation SLERP)·getPlaneWorldPosition 정합·카메라 Lab1(I/O/P/K·legacy)까지 반영됨. 제출 경로·Demo 모드·polish 브랜치는 미완료 ToDo로 유지.
 todos:
   - id: align coords
     content: "Fix plane init + airplane.mesh vs airplaneRig: 스켈레톤 줄 유지, 월드 좌표는 getWorldPosition 헬퍼로 충돌/코인에 반영"
-    status: cancelled
+    status: completed
   - id: paste skeleton
     content: 전역 quaternion/Vector3/state + keydown 30-step + updatePlane 블록을 과제 규격 그대로 삽입; propeller 중복 회전만 최소 조정
-    status: cancelled
+    status: completed
   - id: camera modes
     content: i/o/p(+과제 o/p) 목표 pose + camera position lerp + quaternion slerp; Space/orbit과 충돌 최소 분기
     status: completed
+  - id: rotation slerp
+    content: "updatePlane (B): startQuat→midQuat→endQuat/target 경로 + spanYZ(blendFromMotion) + dtStep; 과제 네 쿼터니언 정합"
+    status: completed
   - id: submission path
     content: lab1_[이름].html/js 및 빌드/rename 절차 정리 (교안 템플릿 수령 후 경로 일치)
-    status: cancelled
+    status: pending
   - id: branch polish
     content: baseline 동작 확인 후 별도 브랜치에서 if/else 개선만
     status: cancelled
@@ -28,11 +31,11 @@ isProject: false
 | 항목 | 상태 |
 |------|------|
 | 스켈레톤 translation (targetPos, 0.1 보간, y=100 시작) | 완료 |
-| 스켈레톤 rotation (start/mid/end/target quaternion, SLERP) | 두 브랜치 각각 구현 방식 상이 — Notion `7. 중요해보이는 것 메모 — Rotation…` 참고 |
+| 스켈레톤 rotation (start/mid/end/target + SLERP, `blendFromMotion`·`dtStep` 역할 분리) | **완료** (`assignment1` `game.js` updatePlane (B)) |
 | 충돌 등 mesh 월드 정합 (`getPlaneWorldPosition`) | 완료 |
-| **Step3 카메라 I/O/P** (목표 pose lerp + quat slerp, Space로 Lab 모드 해제) | **완료** (`game.js` Lab1 step3 블록) |
-| 제출용 lab1_[이름].html/js·zip | 미정 (교안 템플릿 수령 후) |
-| Demo 모드 | pending (본 문서 §8) |
+| **Step3 카메라 I/O/P/K·legacy 토글** (목표 pose lerp/slerp·스냅, Space) | **완료** (`game.js` Lab1 카메라 블록) |
+| 제출용 lab1_[이름].html/js·zip | **pending** (교안 템플릿 수령 후) |
+| Demo 모드 | **pending** (본 문서 §8) |
 
 # 과제1 코드 구현 계획 (스켈레톤 우선 / 기존 코드 최소 변경)
 
