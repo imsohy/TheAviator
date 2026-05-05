@@ -156,7 +156,11 @@ let HEIGHT;
 let WIDTH;
 let mousePos = { x: 0, y: 0 };
 
-/** Lab1 skeleton: WASD는 keydown·targetPos만 사용 */
+/**
+ * Lab1 (WASD):
+ * - keydown에서는 "목표값"만 세팅한다. (targetPos / startQuat / targetQuat)
+ * - 실제 이동/회전 보간은 매 프레임 `updatePlane()`에서 수행한다.
+ */
 const KEYBOARD_PLANE_Z_LIMIT = 120;
 /** Air mesh nose along +local X: rotation.z ≈ pitch, rotation.x ≈ roll (radians scale ~0.45 ≈ 26°). */
 const KEYBOARD_PLANE_PITCH_TILT = 0.45;
@@ -165,10 +169,14 @@ const KEYBOARD_PLANE_ROLL_TILT = 0.45;
 // --- Lab1 skeleton: 전역 (과제 스켈레톤 코드 구성 가이드.md 그대로) ---
 const LAB1_TARGET_STEP = 30.0;
 const targetPos = new THREE.Vector3();
+// keydown 당시 자세(회전 보간의 시작점)
 const startQuat = new THREE.Quaternion();
+// 과제 예시의 "중간 자세": updatePlane()의 slerp에서 저장/참조됨
+// (주의) keydown에서는 임시 피치 쿼터니언 버퍼로도 재사용한다. updatePlane에서 곧 덮어쓴다.
 const midQuat = new THREE.Quaternion();
 /** 과제 가이드: 수평(레벨) 쪽 끝 orientation — 리셋 시 identity만 두고, 매 프레임 multiply 등으로 mutate 하지 않음. */
 const endQuat = new THREE.Quaternion();
+// keydown 방향에 따른 목표 기울기(회전 보간의 첫 번째 목표점)
 const targetQuat = new THREE.Quaternion();
 /** (B)에서 endQuat↔midQuat SLERP 결과 임시 저장 — 과제 네 쿼터니언 외 버퍼 */
 const orientBlendScratch = new THREE.Quaternion();
@@ -415,7 +423,11 @@ function handleKeyUp(event) {
   }
 }
 
-/** Lab1: `targetPos`를 mesh가 실제로 도달 가능한 Y/Z 범위로 맞춤. 밖에 두면 clamp된 위치와의 거리만으로는 "이동이 끝난 것"처럼 보여 orientation SLERP가 멈춘 것처럼 보일 수 있음. */
+/**
+ * Lab1: keydown이 만든 `targetPos`를 "허용 이동 범위"로 제한한다.
+ * - 대상: 목표점(targetPos)
+ * - mesh 자체 clamp는 updatePlane()의 clamp 블록에서 별도로 수행한다. (대상: airplane.mesh.position)
+ */
 function lab1ClampTargetPosToPlayBounds() {
   const yMin = game.planeDefaultHeight - game.planeAmpHeight;
   const yMax = game.planeDefaultHeight + game.planeAmpHeight;
@@ -423,11 +435,21 @@ function lab1ClampTargetPosToPlayBounds() {
   targetPos.z = THREE.MathUtils.clamp(targetPos.z, -KEYBOARD_PLANE_Z_LIMIT, KEYBOARD_PLANE_Z_LIMIT);
 }
 
-/** Lab1 skeleton: keydown 시 targetPos·쿼터니언 (실습 30.0 스텝) */
+/**
+ * Lab1: keydown에서 "한 번의 입력"에 대한 목표값을 세팅한다.
+ *
+ * 세팅하는 값:
+ * - targetPos  : 이번 입력의 목표 위치(클램프 적용)
+ * - startQuat  : 입력 순간의 현재 자세(회전 보간 시작)
+ * - targetQuat : 입력 방향에 따른 목표 기울기(피치/롤)
+ */
 function lab1OnPlaneKeyDown(code) {
   if (!airplane?.mesh || game.status !== 'playing') return;
-  // 과제 가이드: keydown 시점의 mesh orientation을 startQuat에 복사
+
+  // (1) Rotation setup: keydown 순간의 자세를 "회전 보간 시작점"으로 고정
   startQuat.copy(airplane.mesh.quaternion);
+
+  // (2) Translation setup: WASD → (dy, dz) 한 스텝 목표점 생성 후, 플레이 범위로 clamp
   const p = airplane.mesh.position;
   const step = LAB1_TARGET_STEP;
   let dy = 0;
@@ -439,20 +461,16 @@ function lab1OnPlaneKeyDown(code) {
   targetPos.set(p.x, p.y + dy, p.z + dz);
   lab1ClampTargetPosToPlayBounds();
 
-  // 과제 가이드: targetQuat은 setFromAxisAngle로 설정(한 축만 쓸 때는 targetQuat에 직접 호출, 대각은 축 각각 setFromAxisAngle 후 곱).
-  if (dy !== 0 && dz === 0) {
-    targetQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(dy) * KEYBOARD_PLANE_PITCH_TILT);
-  } else if (dz !== 0 && dy === 0) {
-    targetQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(dz) * KEYBOARD_PLANE_ROLL_TILT);
-  } else if (dy !== 0 && dz !== 0) {
-    const qPitch = new THREE.Quaternion();
-    const qRoll = new THREE.Quaternion();
-    qPitch.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(dy) * KEYBOARD_PLANE_PITCH_TILT);
-    qRoll.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(dz) * KEYBOARD_PLANE_ROLL_TILT);
-    targetQuat.copy(qPitch).multiply(qRoll);
-  } else {
-    targetQuat.identity();
-  }
+  // (3) Post-clamp: 경계 clamp를 반영한 "실제 이동량"
+  // - 경계에서 막히면 0이 될 수 있고, 그 경우 기울기도 생기지 않는 게 자연스럽다.
+  const actualDy = targetPos.y - p.y;
+  const actualDz = targetPos.z - p.z;
+
+  // (4) Target orientation: "피치 × 롤" 합성으로 목표 기울기 쿼터니언을 만든다.
+  // - actualDy/Dz가 0이면 sign이 0 → 각도 0 → 항등 쿼터니언이 되어 자연스럽게 해당 축 회전이 사라진다.
+  midQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sign(actualDy) * KEYBOARD_PLANE_PITCH_TILT); // pitch
+  targetQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sign(actualDz) * KEYBOARD_PLANE_ROLL_TILT); // roll
+  targetQuat.premultiply(midQuat); // targetQuat = pitch * roll
 }
 
 function handleMouseUp() {
