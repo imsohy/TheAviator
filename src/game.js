@@ -170,6 +170,8 @@ const midQuat = new THREE.Quaternion();
 /** 과제 가이드: 수평(레벨) 쪽 끝 orientation — 리셋 시 identity만 두고, 매 프레임 multiply 등으로 mutate 하지 않음. */
 const endQuat = new THREE.Quaternion();
 const targetQuat = new THREE.Quaternion();
+/** (B)에서 endQuat↔midQuat SLERP 결과 임시 저장 — 과제 네 쿼터니언 외 버퍼 */
+const orientBlendScratch = new THREE.Quaternion();
 
 /**
  * `mergeVertices` tolerance for sea cylinder.
@@ -1321,18 +1323,18 @@ function updatePlane() {
     airplane.mesh.position.y += (targetY - airplane.mesh.position.y) * 0.1;
     airplane.mesh.position.z += (targetZ - airplane.mesh.position.z) * 0.1;
 
-    // --- (B) Rotation: SLERP 2번만 — “공간”(남은 Y/Z) + “시간”(deltaTime) ---
-    // - targetQuat: keydown에서 KEYBOARD_PLANE_PITCH_TILT / ROLL_TILT 로만 만든 **최대 기울기** 목표(변하지 않음).
-    // - endQuat: 수평(identity). 남은 이동이 클수록 targetQuat 쪽, 도착 근처일수록 수평 쪽 — 같은 스칼라로 한 번에 SLERP.
-    // - midQuat: 그 프레임의 목표 자세(버퍼). mesh.quaternion 은 midQuat 쪽으로만 프레임마다 조금씩 slerp(시간 스무딩).
-    // startQuat 은 keydown 시 스냅샷으로 남겨 두고(가이드·디버깅), 여기서는 end↔target 한 축만 써도 체감이 단순해짐.
-    let tY = Math.abs(airplane.mesh.position.y - targetY);
-    let tZ = Math.abs(airplane.mesh.position.z - targetZ);
-    const orientMotionErr = Math.max(tY, tZ);
-    const bankFromSpace = THREE.MathUtils.smoothstep(orientMotionErr, 0, LAB1_TARGET_STEP * 0.66);
-    midQuat.slerpQuaternions(endQuat, targetQuat, bankFromSpace);
-    const orientAlpha = Math.min(1, (11 * deltaTime) / 1000);
-    airplane.mesh.quaternion.slerp(midQuat, orientAlpha);
+    // --- (B) Rotation: startQuat · midQuat · endQuat · targetQuat + 공간(spanYZ) · 시간(dtStep) ---
+    // keydown 시: startQuat ← mesh.quaternion, targetQuat ← setFromAxisAngle(최대 KEYBOARD_PLANE_* 기울기).
+    // 매 프레임 spanYZ(남은 Y/Z 이동량)로 blendFromMotion ∈ [0,1] — 멀면 기울기, 가까우면 수평 쪽으로 같은 t로 묶음.
+    const spanYZ = Math.max(
+      Math.abs(airplane.mesh.position.y - targetY),
+      Math.abs(airplane.mesh.position.z - targetZ),
+    );
+    const blendFromMotion = THREE.MathUtils.smoothstep(spanYZ, 0, LAB1_TARGET_STEP * 0.66);
+    midQuat.slerpQuaternions(startQuat, targetQuat, blendFromMotion);
+    orientBlendScratch.slerpQuaternions(endQuat, midQuat, blendFromMotion);
+    const dtStep = Math.min(1, (11 * deltaTime) / 1000);
+    airplane.mesh.quaternion.slerp(orientBlendScratch, dtStep);
     airplane.mesh.quaternion.normalize();
 
     // --- (C) Propeller: '항상 돌아가는' 기본 회전(프레임당 고정 증가) ---
